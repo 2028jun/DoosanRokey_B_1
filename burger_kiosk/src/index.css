@@ -1,0 +1,15 @@
+/* src/index.css */
+:root {
+  background-color: #14110b; /* 이미지와 유사한 깊은 검은 갈색 */
+  color: #ffffff;
+  font-family: 'Noto Sans KR', sans-serif;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
