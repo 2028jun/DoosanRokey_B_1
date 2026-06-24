@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'auto_make_hamburgur'
+package_name = 'auto_make_hamburger'
 
 setup(
     name=package_name,
@@ -24,7 +24,9 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'ui_node = auto_make_hamburgur.ui_node:main',
+            'dummy_robot_node = auto_make_hamburger.dummy_robot_node:main',
+            'cooking_manager_node = auto_make_hamburger.cooking_manager_node:main',
+            'ui_node = auto_make_hamburger.ui_node:main',
         ],
     },
 )
