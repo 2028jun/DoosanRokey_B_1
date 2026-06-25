@@ -27,6 +27,7 @@ setup(
             'dummy_robot_node = auto_make_hamburger.dummy_robot_node:main',
             'cooking_manager_node = auto_make_hamburger.cooking_manager_node:main',
             'ui_node = auto_make_hamburger.ui_node:main',
+            'robot_controller_node = auto_make_hamburger.robot_controller_node:main',
         ],
     },
 )
