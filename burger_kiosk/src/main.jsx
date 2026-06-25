@@ -1,10 +1,16 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
-import App from './App.jsx'
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import App from './App';       // 기존 키오스크 화면
+import AdminApp from './AdminApp'; // 방금 만든 관리자 화면
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<App />} />        {/* 기본 경로 */}
+        <Route path="/admin" element={<AdminApp />} /> {/* 관리자 경로 */}
+      </Routes>
+    </BrowserRouter>
+  </React.StrictMode>
+);

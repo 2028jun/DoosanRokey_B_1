@@ -28,6 +28,7 @@ setup(
             'cooking_manager_node = auto_make_hamburger.cooking_manager_node:main',
             'ui_node = auto_make_hamburger.ui_node:main',
             'robot_controller_node = auto_make_hamburger.robot_controller_node:main',
+            'controller = auto_make_hamburger.controller:main',
         ],
     },
 )

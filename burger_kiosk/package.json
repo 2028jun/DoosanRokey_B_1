@@ -10,9 +10,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "install": "^0.13.0",
+    "npm": "^11.17.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "roslib": "^2.1.0"
+    "react-router-dom": "^7.18.0",
+    "ros3d": "^1.1.0",
+    "roslib": "^2.1.0",
+    "three": "^0.185.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

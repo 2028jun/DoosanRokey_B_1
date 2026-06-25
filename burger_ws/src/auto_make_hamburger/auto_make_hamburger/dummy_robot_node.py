@@ -14,7 +14,7 @@ class DummyRobotNode(Node):
         self._action_server = ActionServer(
             self,
             BurgerTask,
-            'robot_task',
+            'burger_task',
             self.execute_callback
         )
         self.get_logger().info('🤖 [가짜 로봇] 테스트용 액션 서버가 가동되었습니다. 명령을 기다립니다.')
