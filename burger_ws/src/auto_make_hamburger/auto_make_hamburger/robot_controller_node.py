@@ -3,6 +3,7 @@ import rclpy
 from rclpy.action import ActionServer
 from hamburger_interfaces.action import BurgerTask
 from hamburger_interfaces.srv import EmergencyStop
+from dsr_msgs2.srv import GetToolForce
 import DR_init
 from std_msgs.msg import Bool
 
@@ -67,8 +68,10 @@ class RobotControllerNode:
         self.init_robot_api(node)
 
         self.force_sensor_pub = self.node.create_publisher(Bool, 'robot_force_sensor', 10)   # 외력 퍼블리시
+        self.tool_force_client = self.node.create_client(GetToolForce, 'aux_control/get_tool_force')
+        self.pending_tool_force_future = None
 
-        self.force_monitor_timer = self.node.create_timer(0.01, self.publish_realtime_force)    # 외력을 계속 계산
+        self.force_monitor_timer = self.node.create_timer(0.1, self.publish_realtime_force)    # 외력을 계속 계산
         self.FORCE_THRESHOLD = 35.0 # 외력 35이상 발생 시 비상정지
         self.is_emergency = False
 
@@ -93,6 +96,57 @@ class RobotControllerNode:
         self.get_logger().info(f"초기 조인트 위치 이동중...: {x0}")
         self.movej(x0, vel=VELOCITY, acc=ACC)
         self.release()
+
+    def emergency_stop_callback(self, request, response):
+        self.is_emergency = request.emergency_state
+        reason = request.reason
+
+        if self.is_emergency is True:
+            self.get_logger().error(f"🛑 비상정지 시스템 가동: {reason}")
+            self.get_logger().error("⚠️ 로봇이 잠금 상태로 전환됩니다. 모든 모션 진입이 강제 차단됩니다.")
+            self.drl_script_pause()
+            response.success = True
+            response.message = "비상 정지 시스템 가동"
+            return response
+
+        else:
+            self.get_logger().warn(f"🔓 비상정지 시스템 해제: {reason}")
+            self.get_logger().info("🔄 비상 상황이 종료되어 로봇 구동을 재개할 준비가 완료되었습니다.")
+            self.drl_script_resume()
+            response.success = True
+            response.message = "비상 정지 시스템 해제"
+            return response
+
+    def publish_realtime_force(self):
+        if self.pending_tool_force_future and not self.pending_tool_force_future.done():
+            return
+
+        if not self.tool_force_client.service_is_ready():
+            return
+
+        request = GetToolForce.Request()
+        request.ref = self.DR_BASE
+        self.pending_tool_force_future = self.tool_force_client.call_async(request)
+        self.pending_tool_force_future.add_done_callback(self.handle_tool_force_response)
+
+    def handle_tool_force_response(self, future):
+        try:
+            result = future.result()
+        except Exception as e:
+            self.get_logger().warn(f"get_tool_force service call failed: {e}")
+            return
+
+        if result is None or not result.success:
+            return
+
+        fx, fy, fz = result.tool_force[0], result.tool_force[1], result.tool_force[2]
+        force_magnitude = sqrt(fx**2 + fy**2 + fz**2)
+
+        msg_sensor = Bool()
+        msg_sensor.data = force_magnitude >= self.FORCE_THRESHOLD
+        if msg_sensor.data:
+            self.get_logger().error(f"🚨 [하드웨어 알람] 실시간 임계값 초과 힘 감지! 계측값: {force_magnitude:.2f} N")
+        self.force_sensor_pub.publish(msg_sensor)
 
     def get_logger(self):
         return self.node.get_logger()
@@ -121,12 +175,10 @@ class RobotControllerNode:
             self.DR_TOOL = dsr.DR_TOOL
             self.DR_BASE = dsr.DR_BASE
             self.DR_MV_MOD_REL = dsr.DR_MV_MOD_REL
-
-            self.get_tool_force = dsr.get_tool_force  # 로봇 끝단(플랜지)에 걸리는 6축 힘/토크를 읽어옴
-
+            self.get_tool_force = dsr.get_tool_force
             self.drl_script_pause = dsr.drl_script_pause
             self.drl_script_resume = dsr.drl_script_resume
-
+            
             # 그리퍼 초기 설정
             self.set_tool("Tool Weight_2FG")
             self.set_tcp("2FG_TCP")
@@ -135,48 +187,7 @@ class RobotControllerNode:
         except ImportError as e:
             self.get_logger().error(f"Error importing DSR_ROBOT2 : {e}")
             raise
-
-    def emergency_stop_callback(self, request, response):
-        self.is_emergency = request.emergency_state
-        reason = request.reason
-
-        if self.is_emergency is True:
-            self.get_logger().error(f"🛑 비상정지 시스템 가동: {reason}")
-            self.get_logger().error("⚠️ 로봇이 잠금 상태로 전환됩니다. 모든 모션 진입이 강제 차단됩니다.")
-            self.drl_script_pause()
-            response.success = True
-            response.message = "비상 정지 시스템 가동"
-            return response
-
-        else:
-            self.get_logger().warn(f"🔓 비상정지 시스템 해제: {reason}")
-            self.get_logger().info("🔄 비상 상황이 종료되어 로봇 구동을 재개할 준비가 완료되었습니다.")
-            self.drl_script_resume()
-            response.success = True
-            response.message = "비상 정지 시스템 해제"
-            return response
-
-    def publish_realtime_force(self):
-        try:
-            force_vector = self.get_tool_force(ref=self.DR_BASE)
-            
-            if force_vector is not None:
-                fx, fy, fz = force_vector[0], force_vector[1], force_vector[2]
-                
-                force_magnitude = sqrt(fx**2 + fy**2 + fz**2)
-                
-                msg_sensor = Bool()
-                if force_magnitude >= self.FORCE_THRESHOLD:
-                    msg_sensor.data = True  # 35N을 넘으면 True를 보내 SafetyManager를 깨움!
-                    self.get_logger().error(f"🚨 [하드웨어 알람] 실시간 임계값 초과 힘 감지! 계측값: {force_magnitude:.2f} N")
-                else:
-                    msg_sensor.data = False # 평소에는 안전하므로 False를 계속 전송
-                self.force_sensor_pub.publish(msg_sensor)
-                
-        except Exception as e:
-            # 로봇이 켜지는 순간 등 통신 지연으로 인한 예외 발생 시 노드가 죽지 않도록 방어
-            pass 
-
+        
     def node_sleep(self, seconds: float):
         """ROS 2 스레드를 방해하지 않는 안전한 대기 함수"""
         self.get_clock().sleep_for(rclpy.duration.Duration(seconds=seconds))
@@ -413,7 +424,7 @@ class RobotControllerNode:
                     self.fry_ingredients_setting()
                     self.movej(x0, vel=VELOCITY, acc=ACC)
             
-            elif task == "튀김세팅" and self.hamburger_done == False:
+            elif (task == "튀김세팅" and self.hamburger_done == False):
                 if self.current_tool is not None:
                     if self.current_tool == "tool":
                         self.release_tool()
