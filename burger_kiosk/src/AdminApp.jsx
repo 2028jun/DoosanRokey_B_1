@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import * as ROSLIB from 'roslib';   
+import * as ROSLIB from 'roslib';
 import * as ROS3D from 'ros3d';
 
 function AdminApp() {
@@ -73,8 +73,14 @@ function AdminApp() {
       setRobotStatus('ROS 2 연결 전: 관리자 명령을 보낼 수 없습니다.');
       return false;
     }
-    const topic = new ROSLIB.Topic({ ros, name: topicName, messageType: 'std_msgs/msg/Bool' });
-    topic.publish(new ROSLIB.Message({ data: msgData }));
+
+    // 💡 브라우저 window 객체에 등록된 전역 ROSLIB을 안전하게 가로챕니다.
+    // HTML 스크립트 기반 로드와 npm 모듈 꼬임 문제를 동시에 해결하는 마법의 가교 코드입니다.
+    const ROSLIB_ENV = window.ROSLIB || require('roslib'); 
+
+    const topic = new ROSLIB_ENV.Topic({ ros, name: topicName, messageType: 'std_msgs/msg/Bool' });
+    topic.publish(new ROSLIB_ENV.Message({ data: msgData })); // ⭕ 에러 완벽 해결
+    
     setRobotStatus(statusText);
     return true;
   };

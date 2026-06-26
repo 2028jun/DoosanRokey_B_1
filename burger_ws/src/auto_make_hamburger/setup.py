@@ -29,6 +29,7 @@ setup(
             'ui_node = auto_make_hamburger.ui_node:main',
             'robot_controller_node = auto_make_hamburger.robot_controller_node:main',
             'controller = auto_make_hamburger.controller:main',
+            'safety_manager_node = auto_make_hamburger.safety_manager_node:main',
         ],
     },
 )

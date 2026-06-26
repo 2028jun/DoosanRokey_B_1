@@ -4,6 +4,7 @@ from rclpy.action import ActionClient
 import collections
 from hamburger_interfaces.msg import OrderInfo
 from hamburger_interfaces.action import BurgerTask
+from hamburger_interfaces.srv import EmergencyStop 
 
 class CookingManagerNode(Node):
     def __init__(self):
@@ -12,6 +13,7 @@ class CookingManagerNode(Node):
         self.order_subscriber = self.create_subscription(
             OrderInfo, 'burger_order', self.order_callback, 10
         )
+
         self.robot_action_client = ActionClient(self, BurgerTask, '/burger_task')
 
         # 상태 및 스케줄링 관리 변수
