@@ -155,7 +155,7 @@ function App() {
   const isCheeseRemoved = selectedToppings.some(t => t.id === 't_no_cheese');
 
   // 각 메뉴의 유무를 true/false로 판단하고 ROS2로 전송
-  const hasTopping = selectedToppings.length > 0;
+  const hasTopping = selectedToppings.filter(t => t.id !== 't_no_cheese').length > 0;
   const hasSauce   = selectedSauces.length > 0;
   const hasBeverage = selectedBeverages.length > 0;
   const hasSide    = selectedSides.length > 0;
@@ -221,7 +221,7 @@ function App() {
                   {tab === 'bun' ? '🍞 번' : tab === 'patty' ? '🥩 패티' : tab === 'topping' ? '🥗 토핑' : tab === 'sauce' ? '🧴 소스' : tab === 'beverage' ? '🥤 음료수' : '🍟 사이드'}
                   {((tab === 'bun' && selectedBun) || (tab === 'patty' && selectedPatty) || (tab === 'topping' && selectedToppings.length > 0) || (tab === 'sauce' && selectedSauces.length > 0) || (tab === 'beverage' && selectedBeverages.length > 0) || (tab === 'side' && selectedSides.length > 0)) && (
                     <span style={styles.tabBadge}>
-                      {tab === 'topping' ? selectedToppings.length : tab === 'sauce' ? selectedSauces.length : tab === 'beverage' ? selectedBeverages.length : tab === 'side' ? selectedSides.length : 1}
+                      {tab === 'topping' ? selectedToppings.filter(t => t.id !== 't_no_cheese').length : tab === 'sauce' ? selectedSauces.length : tab === 'beverage' ? selectedBeverages.length : tab === 'side' ? selectedSides.length : 1}
                     </span>
                   )}
                 </button>

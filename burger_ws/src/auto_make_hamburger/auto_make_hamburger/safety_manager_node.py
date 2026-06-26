@@ -40,7 +40,6 @@ class SafetyManagerNode(Node):
         
         if self.cli_controller.wait_for_service(timeout_sec=1.0):           
             self.cli_controller.call_async(req)
-            self.get_logger().warn("이아아아")
         else:
         # 💡 서비스 서버가 안 켜져 있으면 이 경고가 뜹니다.
             self.get_logger().error("❌ 비상정지 서비스 서버가 응답하지 않습니다! (컨트롤러 노드가 켜져있나요?)")

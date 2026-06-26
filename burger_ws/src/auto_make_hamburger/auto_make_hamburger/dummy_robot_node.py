@@ -1,13 +1,9 @@
-from math import sqrt
+import time
 import rclpy
-from rclpy.action import ActionServer
-from hamburger_interfaces.action import BurgerTask
-from hamburger_interfaces.srv import EmergencyStop
-from dsr_msgs2.srv import GetToolForce
 import DR_init
-from std_msgs.msg import Bool
+from math import sqrt
 
-# --- [로봇 기본 설정 및 전역 변수] ---
+# for single robot
 ROBOT_ID = "dsr01"
 ROBOT_MODEL = "m0609"
 VELOCITY, ACC = 125, 150
@@ -17,461 +13,373 @@ DR_init.__dsr__model = ROBOT_MODEL
 
 OFF, ON = 0, 1
 
-# --- [티칭 좌표 리스트] ---
-tool_home = [[367.96, -225.74, 481.1, 89.43, -91.43, -177.67], [365.46, -314.89, 477.73, 89.26, -91.58, -177.44]]   # 옮기기 도구 잡기
-tool_after = [364.46, -75.59, 503.22, 89.44, -91.65, -177.26]   # 옮기는 도구 잡은 후 뒤로 빼기
-patty_home = [362.82, -90.02, 221.2, 89.18, -91.65, -178.13]     # 패티 위치 이동
-bun_bottom_home = [524.54, -81.59, 319.72, 89.59, -91.20, -177.89] # 하단 빵 위치 이동
-topping1_home = [527.45, -82.2, 221.2, 89.7, -91.11, -178.04]   # 토핑1 위치 이동
-topping2_home = [340.34, -88.37, 411.72, 89.84, -91.29, -177.99]    # 토핑2 위치 이동
-bun_top_home = [343.35, -89.25, 309.89, 89.95, -91.21, -178.17 ] # 상단 빵 위치 이동
-up_gradient = [394.8, -16.99, 528.09, 94.06, -62.64, -179.2]      # 재료 잡은 후 기울여서 안쪽으로 넣기
-
-grill_move = [365.05, 90.01, 479.81, 130.08, -89.88, -174.96]   # 그릴에 안걸리게 위치 이동 
-grill_up = [467.99, -38.01, 552.64, 144.94, -56.48, -177.96]  
-grill_down = [632.34, -124.60, 236.11, 148.00, -116.67, -178.75]    # 패티 떨어 뜨리기
-flip_tool_home = [[542.58, -268.43, 379.72, 89.15, -91.45, -177.98], [544.3, -335.39, 376.47, 88.55, -91.56, -178.04]]  # 뒤집개 도구 잡기
-flip_tool_after = [624.54, 13.24, 443.65, 129.20, -94.28, -173.54]     # 뒤집개 도구 잡고 빼기
-flip_home = [639.0, -144.81, 67.07, 151.86, -101.66, -178.25]   # 뒤집을 장소로 이동
-
-flip_ready = [[20, 0, 0, 0, 0, 0], [0, 0, 120, 0, 0, 0]]    # 패티 도구위에 올리기
-flip_final_ready = [749.13, -200.46, 76.69, 151.77, -95.27, -178.07]   # 뒤집기 전 수평 맞추기
-
-plating_up = [572.9, 36.28, 550.34, 38.12,  72.86, -1.41]   # 트레이 위로 이동
-plating_middle = [584.55, 54.14, 448.74, 38.12, 73.42, -1.27]   # 트레이 중간 위치
-# plating_down = [591.95, 51.27, 266.46, 36.98, 103.66, 0.43] # 트레이 아래로 내려서 재료 넣기
-plating_down = [601.67, 75.6, 333.91, 37.06, 113.6, 0.02]
-
-patty_ready = [[25, 0, 0, 0, 0, 0], [0, 0, 130, 0, 0, 0], [-25, 0, 0, 0, 0, 0]] # 패티를 그릴 위에서 잡기
-patty_grip_home = [577.26, -81.14, 161.72, 145.45, -90.77, -179.16] # 패티 잡기 위해 그릴로 이동
-
-ingredient_ready = [[0, 0, 90, 0, 0, 0], [20, 0, 0, 0, 0, 0], [0, 0, 125, 0, 0, 0], [-20, 0, 0, 0, 0, 0], [0, 0, -220, 0, 0, 0]]
-# 칸에서 재료 잡기
-
-fry_home = [453.73, 327.32, 255.87, 85.81, 88.06, 1.86] # 튀김 잡기 준비
-fry_grip = [456.94, 395.29, 257.77, 85.97, 87.97, 1.78] # 튀김 잡기
-fry_pongdang = [[-120, 0, 0, 0, 0, 0], [0, 0, 160, 0, 0, 0], [120, 0, 0, 0, 0, 0], [0, 0, -160, 0, 0, 0]]  # 튀김망 튀김기에 넣기
-flip_angle = 180    # 뒤집는 각도
-
-x0 = [0, 0, 90, 0, 90, 0]   # 초기화 조인트 각도
-
-fry_plating_up = [779.03, 78.83, 196.43, 24.49, 92.43, 0.11]   # 튀김망 트레이 위로 올리기
-fry_back_home = [456.94, 395.29, 300.77, 85.97, 87.97, 1.78] # 튀김망 제자리로 이동
-
-
-class RobotControllerNode:
-    def __init__(self, node):
-        self.node = node
-
-        self.hamburger_done = False
-
-        # 두산 로봇 API 지연 임포트 및 바인딩
-        self.init_robot_api(node)
-
-        self.force_sensor_pub = self.node.create_publisher(Bool, 'robot_force_sensor', 10)   # 외력 퍼블리시
-        self.tool_force_client = self.node.create_client(GetToolForce, 'aux_control/get_tool_force')
-        self.pending_tool_force_future = None
-
-        self.force_monitor_timer = self.node.create_timer(0.1, self.publish_realtime_force)    # 외력을 계속 계산
-        self.FORCE_THRESHOLD = 35.0 # 외력 35이상 발생 시 비상정지
-        self.is_emergency = False
-
-        self.srv = self.node.create_service(
-            EmergencyStop, 
-            '/emergency_stop_robot_controller', 
-            self.emergency_stop_callback  
-        )
-
-        # 액션 서버 가동
-        self._action_server = ActionServer(
-            self.node,
-            BurgerTask,
-            '/burger_task',
-            self.execute_callback
-        )
-        self.get_logger().info('🤖 두산 로봇 실구동 제어 액션 서버가 가동되었습니다.')
-
-        self.current_tool = None
-        
-        # 시작 시 로봇 홈 위치로 초기화 이동
-        self.get_logger().info(f"초기 조인트 위치 이동중...: {x0}")
-        self.movej(x0, vel=VELOCITY, acc=ACC)
-        self.release()
-
-    def emergency_stop_callback(self, request, response):
-        self.is_emergency = request.emergency_state
-        reason = request.reason
-
-        if self.is_emergency is True:
-            self.get_logger().error(f"🛑 비상정지 시스템 가동: {reason}")
-            self.get_logger().error("⚠️ 로봇이 잠금 상태로 전환됩니다. 모든 모션 진입이 강제 차단됩니다.")
-            self.drl_script_pause()
-            response.success = True
-            response.message = "비상 정지 시스템 가동"
-            return response
-        else:
-            self.get_logger().warn(f"🔓 비상정지 시스템 해제: {reason}")
-            self.get_logger().info("🔄 비상 상황이 종료되어 로봇 구동을 재개할 준비가 완료되었습니다.")
-            self.drl_script_resume()
-            response.success = True
-            response.message = "비상 정지 시스템 해제"
-            return response
-
-    def publish_realtime_force(self):
-        if self.pending_tool_force_future and not self.pending_tool_force_future.done():
-            return
-
-        if not self.tool_force_client.service_is_ready():
-            return
-
-        request = GetToolForce.Request()
-        request.ref = self.DR_BASE
-        self.pending_tool_force_future = self.tool_force_client.call_async(request)
-        self.pending_tool_force_future.add_done_callback(self.handle_tool_force_response)
-
-    def handle_tool_force_response(self, future):
-        try:
-            result = future.result()
-        except Exception as e:
-            self.get_logger().warn(f"get_tool_force service call failed: {e}")
-            return
-
-        if result is None or not result.success:
-            return
-
-        fx, fy, fz = result.tool_force[0], result.tool_force[1], result.tool_force[2]
-        force_magnitude = sqrt(fx**2 + fy**2 + fz**2)
-
-        msg_sensor = Bool()
-        msg_sensor.data = force_magnitude >= self.FORCE_THRESHOLD
-        if msg_sensor.data:
-            self.get_logger().error(f"🚨 [하드웨어 알람] 실시간 임계값 초과 힘 감지! 계측값: {force_magnitude:.2f} N")
-        self.force_sensor_pub.publish(msg_sensor)
-
-    def get_logger(self):
-        return self.node.get_logger()
-
-    def get_clock(self):
-        return self.node.get_clock()
-
-    def init_robot_api(self, dsr_node):
-        """두산 API를 노드 내부 스코프로 안전하게 바인딩"""
-        setattr(DR_init, "__dsr__id", ROBOT_ID)
-        setattr(DR_init, "__dsr__model", ROBOT_MODEL)
-        setattr(DR_init, "__dsr__node", dsr_node)
-
-        try:
-            import DSR_ROBOT2 as dsr
-            
-            # 외부 제어 함수 매핑
-            self.set_digital_output = dsr.set_digital_output
-            self.get_digital_input = dsr.get_digital_input
-            self.movej = dsr.movej
-            self.movel = dsr.movel
-            self.move_periodic = dsr.move_periodic
-            self.set_tool = dsr.set_tool
-            self.set_tcp = dsr.set_tcp
-            
-            self.DR_TOOL = dsr.DR_TOOL
-            self.DR_BASE = dsr.DR_BASE
-            self.DR_MV_MOD_REL = dsr.DR_MV_MOD_REL
-            self.get_tool_force = dsr.get_tool_force
-            self.drl_script_pause = dsr.drl_script_pause
-            self.drl_script_resume = dsr.drl_script_resume
-            
-            # 그리퍼 초기 설정
-            self.set_tool("Tool Weight_2FG")
-            self.set_tcp("2FG_TCP")
-
-            
-        except ImportError as e:
-            self.get_logger().error(f"Error importing DSR_ROBOT2 : {e}")
-            raise
-        
-    def node_sleep(self, seconds: float):
-        """ROS 2 스레드를 방해하지 않는 안전한 대기 함수"""
-        self.get_clock().sleep_for(rclpy.duration.Duration(seconds=seconds))
-
-    def wait_digital_input(self, sig_num):
-        while not self.get_digital_input(sig_num):
-            self.node_sleep(0.1)
-            self.get_logger().info(f"Wait for digital input: {sig_num}", throttle_duration_sec=2.0)
-
-    def release(self):  # 그리퍼놓기
-        print("set for digital output 0 1 for release")
-        self.set_digital_output(2, ON)
-        self.set_digital_output(1, OFF)
-        self.wait_digital_input(2)
-
-    def grip(self):   # 그리퍼 잡기  
-        print("set for digital output 1 0 for grip")
-        self.set_digital_output(1, ON)
-        self.set_digital_output(2, OFF)
-        self.wait_digital_input(1)
-
-    def shake(self):
-        self.move_periodic(amp=[0,0,-10,0,0,0], period=0.5, atime=0.2, repeat=3, ref=self.DR_TOOL)
-
-    # --- [도구 장착 제어] ---
-    def grip_tool(self):    # 옮기기 도구 잡기
-        self.movel(tool_after, vel=VELOCITY, acc=ACC)
-        self.movel(tool_home[0], vel=VELOCITY, acc=ACC)
-        self.movel(tool_home[1], vel=VELOCITY, acc=ACC)
-        self.grip()
-        self.movel(tool_after, vel=VELOCITY, acc=ACC)
-        self.current_tool = "tool"
-
-    def release_tool(self): # 옮기기 도구 놓기
-        self.movel(tool_after, vel=VELOCITY, acc=ACC)
-        self.movel([-30, 0, 0, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel([0, 0, 230, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel(tool_home[1], vel=VELOCITY, acc=ACC)
-        self.release()
-        self.movel(tool_after, vel=VELOCITY, acc=ACC)
-        self.current_tool = None
-
-    def grip_flip_tool(self):    # 뒤집기 도구 잡기
-        self.movel(tool_after, vel=VELOCITY, acc=ACC)
-        self.movel(flip_tool_home[0], vel=VELOCITY, acc=ACC)
-        self.movel(flip_tool_home[1], vel=VELOCITY, acc=ACC)
-        self.grip()
-        self.movel(flip_tool_after, vel=VELOCITY, acc=ACC)
-        self.current_tool = "flip_tool"
-
-    def release_flip_tool(self):    # 뒤집기 도구 놓기
-        self.movel(flip_tool_after, vel=VELOCITY, acc=ACC)
-        self.movel(flip_tool_home[0], vel=VELOCITY, acc=ACC)
-        self.movel(flip_tool_home[1], vel=VELOCITY, acc=ACC)
-        self.release()
-        self.movel(flip_tool_after, vel=VELOCITY, acc=ACC)
-        self.current_tool = None
-
-    # --- [재료 공급 및 가공 모션 시퀀스] ---
-    def ingredients_grip(self):
-        self.movel(ingredient_ready[0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel(ingredient_ready[1], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel(ingredient_ready[2], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)  
-        self.movel(ingredient_ready[3], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel(ingredient_ready[4], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-
-    def ingredients_setting(self):
-        self.movel(plating_up, vel=20, acc=30)
-        self.movel(plating_middle, vel=VELOCITY, acc=ACC)
-        self.movel(plating_down, vel=VELOCITY, acc=ACC)
-        self.shake()
-
-    def rev_ingredients_setting(self):
-        self.movel(plating_up, vel=VELOCITY, acc=ACC)
-
-    def ingredients_to_burger(self):
-        self.movel(up_gradient, vel=VELOCITY, acc=ACC)
-        self.shake()
-        self.ingredients_setting()
-        self.node_sleep(1)
-        self.rev_ingredients_setting()
-        self.movel(up_gradient, vel=20, acc=30)
-
-    def patty_to_grill(self):
-        self.movel(up_gradient, vel=VELOCITY, acc=ACC)
-        self.shake()
-        self.movel(grill_up, vel=VELOCITY, acc=ACC)
-        self.movel(grill_down, vel=VELOCITY, acc=ACC)
-        self.shake()
-        self.movel(grill_move, vel=VELOCITY, acc=ACC)
-        self.movel(tool_after, vel=VELOCITY, acc=ACC)
-
-    def flip_patty(self):
-        self.movel(flip_home, vel=VELOCITY, acc=ACC)
-        self.movel(flip_ready[0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel(flip_ready[1], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel(flip_final_ready, vel=VELOCITY, acc=ACC)
-        self.movej([0, 0, 0, 0, 0, flip_angle], vel=100, acc=150, mod=self.DR_MV_MOD_REL)
-        self.node_sleep(2)
-        self.movel([30, 0, 0, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-
-    def pick_patty(self):
-        self.movel(grill_up, vel=VELOCITY, acc=ACC)
-        self.movel(patty_grip_home, vel=VELOCITY, acc=ACC)
-        self.movel(patty_ready[0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel(patty_ready[1], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel(patty_ready[2], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel(grill_up, vel=VELOCITY, acc=ACC)
-        self.shake()
-        self.ingredients_setting()
-        self.node_sleep(1)
-        self.rev_ingredients_setting()
-        self.movel(up_gradient, vel=20, acc=30)
-
-    def fry_in(self):
-        self.movel(fry_home, vel=VELOCITY, acc=ACC)
-        self.movel(fry_grip, vel=VELOCITY, acc=ACC)
-        self.grip()
-        self.movel(fry_pongdang[0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel(fry_pongdang[1], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel(fry_pongdang[2], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.release()
-        self.movel(fry_home, vel=VELOCITY, acc=ACC)
-
-    def fry_out(self):
-        self.movej(x0, vel=VELOCITY, acc=ACC)
-        self.movel(fry_grip, vel=VELOCITY, acc=ACC)
-        self.movel(fry_pongdang[1], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.grip()
-        self.movel(fry_pongdang[0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel(fry_pongdang[3], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel(fry_grip, vel=VELOCITY, acc=ACC)
-        self.release()
-        self.movel(fry_home, vel=VELOCITY, acc=ACC)
-
-    def fry_ingredients_setting(self):
-        self.movel(fry_pongdang[0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel(fry_pongdang[3], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel(fry_plating_up, vel=VELOCITY, acc=ACC)
-        self.movej([0, 0, 0, 0, 0, -140], vel = 100, acc=150, mod=self.DR_MV_MOD_REL) # 튀김 트레이에 붓기
-        self.movel(fry_plating_up, vel=VELOCITY, acc=ACC)
-        self.movel([-200, 0, 0, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
-        self.movel(fry_back_home, vel=VELOCITY, acc=ACC)
-        self.movel(fry_grip, vel=VELOCITY, acc=ACC)
-        self.release()
-        self.movel(fry_home, vel=VELOCITY, acc=ACC)
-
-    # --- [상위 매니저 명령 수신 및 조율부] ---
-    def execute_callback(self, goal_handle):
-        order_id = goal_handle.request.order_id
-        task = goal_handle.request.task_type        # 예: "PICK", "FLIP", "FRY" 등
-        item = goal_handle.request.ingredient       # 예: "patty", "bun_top", "topping1" 등
-        dest = goal_handle.request.destination
-
-        self.get_logger().info(f'📥 [명령 접수] 주문:{order_id} | Task:{task} | 대상:{item}')
-
-        try:
-            if task == "튀김조리":
-                if self.current_tool is not None:
-                    if self.current_tool == "tool":
-                        self.release_tool()
-                    elif self.current_tool == "flip_tool":
-                        self.release_flip_tool() 
-                self.fry_in()
-                self.movej(x0, vel=VELOCITY, acc=ACC)
-                print(f"위치 초기화: {x0}") 
-
-            # 1. 재료 조리 및 운반 태스크 매핑
-            elif task == "재료 옮기기":
-                if self.current_tool != "tool":
-                    if self.current_tool is None:
-                        self.grip_tool()
-                    elif self.current_tool == "flip_tool":
-                        self.release_flip_tool() 
-                        self.grip_tool()
-                # 대상 아이템 홈 위치 찾기
-                if item == "패티":  # 그릴 위 패티를 트레이로 옮기기
-                    self.pick_patty()
-                elif item == "상단 빵":
-                    self.movel(bun_top_home, vel=VELOCITY, acc=ACC)
-                    self.ingredients_grip()
-                    self.ingredients_to_burger()
-                    self.release_tool()
-                    self.movej(x0, vel=VELOCITY, acc=ACC)
-                    self.hamburger_done = True
-                elif item == "토핑":
-                    self.movel(topping1_home, vel=VELOCITY, acc=ACC)
-                    self.ingredients_grip()
-                    self.ingredients_to_burger()
-                elif item == "치즈":
-                    self.movel(topping2_home, vel=VELOCITY, acc=ACC)
-                    self.ingredients_grip()
-                    self.ingredients_to_burger()
-                elif item == "하단 빵":
-                    self.movel(bun_bottom_home, vel=VELOCITY, acc=ACC)
-                    self.ingredients_grip()
-                    self.ingredients_to_burger()
-                else:
-                    self.get_logger().warn(f"미정의된 재료입니다: {item}")
-
-            # 2. 패티 뒤집기 태스크 매핑
-            elif task == "패티뒤집기":
-                if self.current_tool != "flip_tool":
-                    if self.current_tool is None:
-                        self.grip_flip_tool()
-                    elif self.current_tool == "tool":
-                        self.release_tool() 
-                        self.grip_flip_tool()
-                self.flip_patty()
-                self.release_flip_tool() 
-
-            elif task == "패티조리":
-                if self.current_tool != "tool":
-                    if self.current_tool is None:
-                        self.grip_tool()
-                    elif self.current_tool == "flip_tool":
-                        self.release_flip_tool() 
-                        self.grip_tool()
-                self.movel(patty_home, vel=VELOCITY, acc=ACC)
-                self.ingredients_grip()
-                self.patty_to_grill()
-
-            elif task == "튀김옮기기":
-                if self.current_tool is not None:
-                    if self.current_tool == "tool":
-                        self.release_tool()
-                    elif self.current_tool == "flip_tool":
-                        self.release_flip_tool() 
-                self.fry_out()
-
-                if self.hamburger_done is True:
-                    self.movel(fry_grip, vel=VELOCITY, acc=ACC)
-                    self.grip()
-                    self.fry_ingredients_setting()
-                    self.movej(x0, vel=VELOCITY, acc=ACC)
-            
-            elif task == "튀김세팅" and self.hamburger_done == False:
-                if self.current_tool is not None:
-                    if self.current_tool == "tool":
-                        self.release_tool()
-                    elif self.current_tool == "flip_tool":
-                        self.release_flip_tool() 
-
-                self.movel(fry_home, vel=VELOCITY, acc=ACC)
-                self.movel(fry_grip, vel=VELOCITY, acc=ACC)
-                self.grip()
-                self.fry_ingredients_setting()
-                self.get_logger().info(f"초기 조인트 위치 이동중...: {x0}")
-                self.movej(x0, vel=VELOCITY, acc=ACC)
-            
-            else:
-                self.get_logger().error(f"알 수 없는 Task 요청입니다: {task}")
-                goal_handle.abort()
-                result = BurgerTask.Result()
-                result.success = False
-                return result
-
-            # 구동 성공 후 상위 노드로 결과 리턴
-            goal_handle.succeed()
-            result = BurgerTask.Result()
-            result.success = True
-            self.get_logger().info(f'📤 [완료 통보] 주문 {order_id}의 {task} 작업 성공!')
-            return result
-
-        except Exception as e:
-            self.get_logger().error(f"로봇 구동 중 예외 발생: {e}")
-            goal_handle.abort()
-            result = BurgerTask.Result()
-            result.success = False
-            return result
-
 def main(args=None):
     rclpy.init(args=args)
+    node = rclpy.create_node("rokey_force_control", namespace=ROBOT_ID)
 
-    node = rclpy.create_node('robot_controller_node', namespace=ROBOT_ID)
-    controller = RobotControllerNode(node)
-    
+    DR_init.__dsr__node = node
+
     try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        from DSR_ROBOT2 import (
+            set_digital_output,
+            get_digital_input,
+            release_compliance_ctrl,
+            release_force,
+            get_current_posx,
+            task_compliance_ctrl,
+            set_desired_force,
+            set_tool,
+            set_tcp,
+            movej,
+            amovel,
+            movel,
+            get_tool_force,
+            move_periodic,
+            DR_MV_MOD_REL,
+            DR_FC_MOD_ABS,
+            DR_BASE,
+            DR_TOOL
+        )
+
+        from DR_common2 import posx, posj
+
+    except ImportError as e:
+        print(f"Error importing DSR_ROBOT2 : {e}")
+        return
+    
+    tool_home = [[367.96, -225.74, 481.1, 89.43, -91.43, -177.67], [365.46, -314.89, 477.73, 89.26, -91.58, -177.44]]   # 옮기기 도구 잡기
+    tool_after = [364.46, -75.59, 503.22, 89.44, -91.65, -177.26]   # 옮기는 도구 잡은 후 뒤로 빼기
+    patty_home = [362.82, -90.02, 221.2, 89.18, -91.65, -178.13]     # 패티 위치 이동
+    bun_top_home = [524.54, -81.59, 319.72, 89.59, -91.20, -177.89] # 상단 빵 위치 이동
+    topping1_home = [527.45, -82.2, 221.2, 89.7, -91.11, -178.04]   # 토핑1 위치 이동
+    topping2_home = [340.34, -88.37, 411.72, 89.84, -91.29, -177.99]    # 토핑2 위치 이동
+    bun_bottom_home = [343.35, -89.25, 309.89, 89.95, -91.21, -178.17 ] # 하단 빵 위치 이동
+    up_gradient = [394.8, -16.99, 528.09, 94.06, -62.64, -179.2]      # 재료 잡은 후 기울여서 안쪽으로 넣기
+
+    grill_move = [365.05, 90.01, 479.81, 130.08, -89.88, -174.96]   # 그릴에 안걸리게 위치 이동 
+    grill_up = [528.39, -44.42, 460.39, 146.52, -77.65, 177.82]         # 그릴 위로 이동
+    grill_down = [632.34, -124.60, 236.11, 148.00, -116.67, -178.75]    # 패티 떨어 뜨리기
+    flip_tool_home = [[542.58, -268.43, 379.72, 89.15, -91.45, -177.98], [544.3, -335.39, 376.47, 88.55, -91.56, -178.04]]  # 뒤집개 도구 잡기
+    flip_tool_after = [624.54, 13.24, 443.65, 129.20, -94.28, -173.54]     # 뒤집개 도구 잡고 빼기
+    flip_home = [639.0, -144.81, 67.07, 151.86, -101.66, -178.25]   # 뒤집을 장소로 이동
+
+    flip_ready = [[18, 0, 0, 0, 0, 0], [0, 0, 120, 0, 0, 0]]    # 패티 도구위에 올리기
+    flip_final_ready = [749.13, -200.46, 76.69, 151.77, -95.27, -178.07]   # 뒤집기 전 수평 맞추기
+
+    plating_up = [572.9, 36.28, 550.34, 38.12,  72.86, -1.41]   # 트레이 위로 이동
+    plating_middle = [584.55, 54.14, 448.74, 38.12, 73.42, -1.27]   # 트레이 중간 위치
+    plating_down = [591.95, 51.27, 266.46, 36.98, 103.66, 0.43] # 트레이 아래로 내려서 재료 넣기
+
+    patty_ready = [[25, 0, 0, 0, 0, 0], [0, 0, 130, 0, 0, 0], [-25, 0, 0, 0, 0, 0]] # 패티를 그릴 위에서 잡기
+    patty_grip_home = [577.26, -81.14, 161.72, 145.45, -90.77, -179.16] # 패티 잡기 위해 그릴로 이동
+
+    ingredient_ready = [[0, 0, 90, 0, 0, 0], [20, 0, 0, 0, 0, 0], [0, 0, 125, 0, 0, 0], [-20, 0, 0, 0, 0, 0], [0, 0, -220, 0, 0, 0]]
+    # 칸에서 재료 잡기
+  
+    fry_home = [453.73, 327.32, 255.87, 85.81, 88.06, 1.86] # 튀김 잡기 준비
+    fry_grip = [456.94, 395.29, 257.77, 85.97, 87.97, 1.78] # 튀김 잡기
+    fry_pongdang = [[-120, 0, 0, 0, 0, 0], [0, 0, 160, 0, 0, 0], [120, 0, 0, 0, 0, 0]]  # 튀김망 튀김기에 넣기
+    fry_out_move = [0, 0, -160, 0, 0, 0]   # 튀김망에서 튀김기 뒤로 뺴기
+    flip_angle = 180    # 뒤집는 각도
+
+    fry_plating_up = [779.03, 78.83, 196.43, 24.49, 92.43, 0.11]   # 튀김망 트레이 위로 올리기
+    fry_back_home = [456.94, 395.29, 300.77, 85.97, 87.97, 1.78] # 튀김망 제자리로 이동
+
+    sauce_home = [795.41, -62.28, 74.72, 168.75, -96.6, 89.5] # 소스통 잡기 준비
+    sauce_pick = [869.76, -77.15, 66.2, 168.62, -96.43, 89.71] # 소스통 잡기
+    sauce_ready = [838.65, 59.5, 386.38, 3.71, 100.86, -91.01] # 소스통 잡고 올리기
+    sauce_final_ready = [880.82, 204.73, 262.86, 13.02, 109.0, 88.72] # 소스통 잡고 뒤집기
+    sauce_real_final_ready = [880.29, 209.59, 209.57, 16.65, 109.25, 89.66] # 소스통 잡고 뒤집기 후   트레이 위로 이동
+    
+    sauce_move = [[890.35, 164.53, 184.12, 13.7, 110.75, 89.81], [861.68, 245.13, 177.03, 19.11, 111.69, 89.9], [912.29, 183.09, 173.33, 14.61, 110.14, 89.76], [885.53, 253.54, 175.8, 19.23, 110.49, 89.79]]
+
+
+    drink_home = [223.52, -177.16, 90.54, 55.78, -96.52, -86.74] # 음료 잡기 준비
+    drink_pick = [201.34, -271.24, 69.21, 55.78, -96.52, -86.74] # 음료 잡기
+    drink_middle = [422.34, -233.62, 229.59, 86.51, -90.51, -88.66] # 음료 옮기기 중간
+    drink_ready = [881.73, 75.51, 127.47, 176.65, -92.08, -90.80] # 음료 내리기
+
+    x0 = [0, 0, 90, 0, 90, 0]   # 초기화 조인트 각도
+
+    def shake():
+        move_periodic(amp =[0,0,-10,0,0,0], period=0.5, atime=0.2, repeat=2, ref=DR_TOOL)
+
+    def shake_oil():
+        move_periodic(amp =[10,0,0,0,0,0], period=0.5, atime=0.2, repeat=3, ref=DR_TOOL)
+
+    def shake_sauce():
+        movel(sauce_move[0], vel=VELOCITY, acc=ACC)
+        movel(sauce_move[1], vel=VELOCITY, acc=ACC)
+        movel(sauce_move[2], vel=VELOCITY, acc=ACC)
+        movel(sauce_move[3], vel=VELOCITY, acc=ACC)
+
+    
+    def wait_digital_input(sig_num):
+        while not get_digital_input(sig_num):
+            time.sleep(0.5)
+            print(f"Wait for digital input: {sig_num}")
+            pass
+    
+    def release():  # 그리퍼놓기
+        print("set for digital output 0 1 0 for release")
+        set_digital_output(2, ON)
+        set_digital_output(1, OFF)
+        set_digital_output(3, OFF)
+        wait_digital_input(2)
+
+    def grip(): # 그리퍼 잡기
+        print("set for digital output 1 0 0 for grip")
+        set_digital_output(1, ON)
+        set_digital_output(2, OFF)
+        set_digital_output(3, OFF)
+        wait_digital_input(1)
+
+    def source_grip(): # 소스통 잡기
+        print("set for digital output 0 0 1 for grip")
+        set_digital_output(3, ON)
+        set_digital_output(1, OFF)
+        set_digital_output(2, OFF)
+        time.sleep(1)
+
+    def grip_soft(): # 소스통 누르기, 음료 잡기
+        print("set for digital output 1 0 1 for grip")
+        set_digital_output(3, ON)
+        set_digital_output(1, ON)
+        set_digital_output(2, OFF)
+        time.sleep(1)
+
+    def release_wait():  # 소스, 음료용 그리퍼놓기
+        print("set for digital output 0 1 0 for release")
+        set_digital_output(2, ON)
+        set_digital_output(1, OFF)
+        set_digital_output(3, OFF)
+        time.sleep(1)
+
+    set_tool("Tool Weight_2FG")
+    set_tcp("2FG_TCP")
+
+    def grip_tool():    # 옮기기 도구 잡기
+        # movel(tool_after, vel=VELOCITY, acc=ACC)
+        movel(tool_home[0], vel=VELOCITY, acc=ACC)
+        movel(tool_home[1], vel=VELOCITY, acc=ACC)
+        grip()
+        movel(tool_after, vel=VELOCITY, acc=ACC)
+
+    def release_tool(): # 옮기기 도구 놓기
+        movel(tool_after, vel=VELOCITY, acc=ACC)
+        movel([-30, 0, 0, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movel([0, 0, 230, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        # movel(tool_home[0], vel=VELOCITY, acc=ACC)
+        movel(tool_home[1], vel=VELOCITY, acc=ACC)
+        release()
+        movel(tool_after, vel=VELOCITY, acc=ACC)
+
+
+
+    def grip_flip_tool():   # 뒤집기 도구 잡기
+        movel(tool_after, vel=VELOCITY, acc=ACC)
+        movel(flip_tool_home[0], vel=VELOCITY, acc=ACC)
+        movel(flip_tool_home[1], vel=VELOCITY, acc=ACC)
+        grip()
+        movel(flip_tool_after, vel=VELOCITY, acc=ACC)
+
+    
+    def release_flip_tool():    # 뒤집기 도구 놓기
+        movel(flip_tool_after, vel=VELOCITY, acc=ACC)
+        movel(flip_tool_home[0], vel=VELOCITY, acc=ACC)
+        movel(flip_tool_home[1], vel=VELOCITY, acc=ACC)
+        release()
+        movel(flip_tool_after, vel=VELOCITY, acc=ACC)
+
+    def flip():    # 패티 뒤집기
+        movel(flip_home, vel=VELOCITY, acc=ACC)
+        movel(flip_ready[0], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movel(flip_ready[1], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movel(flip_final_ready, vel=VELOCITY, acc=ACC)
+        movej([0, 0, 0, 0, 0, flip_angle], vel = 100, acc=150, mod=DR_MV_MOD_REL)
+        time.sleep(2)
+        movel([30, 0, 0, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+
+
+    def ingredients_setting():  # 재료를 트레이로 옮기기
+        movel(plating_up, vel=20, acc=30)
+        movel(plating_middle, vel=VELOCITY, acc=ACC)
+        movel(plating_down, vel=VELOCITY, acc=ACC)
+        shake()
+
+    def rev_ingredients_setting():  # 재료 옮긴 후 복귀
+        movel(plating_up, vel=VELOCITY, acc=ACC)
+
+    
+    def ingredients_grip():     # 재료를 잡고 위로 올리기
+        movel(ingredient_ready[0], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movel(ingredient_ready[1], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movel(ingredient_ready[2], vel=VELOCITY, acc=ACC, ref=DR_TOOL)  
+        movel(ingredient_ready[3], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movel(ingredient_ready[4], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+
+    def ingredients_to_burger():    # 재료를 쌓고 복귀
+        movel(up_gradient, vel=VELOCITY, acc=ACC)
+        shake()
+        ingredients_setting()
+        time.sleep(1)
+        rev_ingredients_setting()
+        movel(up_gradient, vel=20, acc=30)
+    
+    def pattty_to_grill():  # 패티를 그릴 위로 이동
+        movel(up_gradient, vel=VELOCITY, acc=ACC)
+        shake()
+        movel(grill_up, vel=VELOCITY, acc=ACC)
+        movel(grill_down, vel=VELOCITY, acc=ACC)
+        shake()
+        movel(grill_move, vel=VELOCITY, acc=ACC)
+        movel(tool_after, vel=VELOCITY, acc=ACC)
+
+    def pick_patty():   # 그릴 위에서 패티 잡거 트레이까지 옮기기
+        movel(grill_up, vel=VELOCITY, acc=ACC)
+        movel(patty_grip_home, vel=VELOCITY, acc=ACC)
+        movel(patty_ready[0], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movel(patty_ready[1], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movel(patty_ready[2], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movel(grill_up, vel=VELOCITY, acc=ACC)
+
+        ingredients_setting()
+        time.sleep(3)
+        rev_ingredients_setting()
+        movel(up_gradient, vel=20, acc=30)
+    
+    def fry_in():
+        movel(fry_home, vel=VELOCITY, acc=ACC)
+        movel(fry_grip, vel=VELOCITY, acc=ACC)
+        grip()
+        movel(fry_pongdang[0], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movel(fry_pongdang[1], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movel(fry_pongdang[2], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        release()
+        movel(fry_home, vel=VELOCITY, acc=ACC)
+
+    def fry_out():
+        movej(x0, vel=VELOCITY, acc=ACC)
+        movel(fry_grip, vel=VELOCITY, acc=ACC)
+        movel(fry_pongdang[1], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        grip()
+        movel(fry_pongdang[0], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        shake_oil()
+        movel(fry_out_move, vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        
+
+    def fry_ingredients_setting():
+        movel([0, 0, -100, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movel(fry_plating_up, vel=VELOCITY, acc=ACC)
+        movej([0, 0, 0, 0, 0, -140], vel = 100, acc=150, mod=DR_MV_MOD_REL)
+        movel(fry_plating_up, vel=VELOCITY, acc=ACC)
+        movel([-300, 0, 0, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movel(fry_back_home, vel=VELOCITY, acc=ACC)
+        movel(fry_grip, vel=VELOCITY, acc=ACC)
+        release()
+        movel(fry_home, vel=VELOCITY, acc=ACC)
+
+    def sauce_setting():
+        movel(sauce_home, vel=VELOCITY, acc=ACC)
+        movel(sauce_pick, vel=VELOCITY, acc=ACC)
+        source_grip()
+        movel(sauce_ready, vel=VELOCITY, acc=ACC)
+        movel(sauce_final_ready, vel=VELOCITY, acc=ACC)
+        movel(sauce_real_final_ready, vel=VELOCITY, acc=ACC)
+        grip_soft()
+        shake_sauce()
+        source_grip()
+        movel(sauce_ready, vel=VELOCITY, acc=ACC)
+        movel(sauce_pick, vel=VELOCITY, acc=ACC)
+        release_wait()
+        movel(sauce_home, vel=VELOCITY, acc=ACC)
+
+    def drink_setting():
+        movel(drink_home, vel=VELOCITY, acc=ACC)
+        movel(drink_pick, vel=VELOCITY, acc=ACC)
+        grip_soft()
+        movel(drink_middle, vel=VELOCITY, acc=ACC)
+        movel(drink_ready, vel=VELOCITY, acc=ACC)
+        movel([0, -50, 0, 0, 0, 0], vel=VELOCITY, acc=ACC ,ref=DR_TOOL)
+        release_wait()
+        movel([0, 0, -50, 0, 0, 0], vel=VELOCITY, acc=ACC ,ref=DR_TOOL)
+        movel(drink_middle, vel=VELOCITY, acc=ACC)
+        
+
+
+    if rclpy.ok():
+        # release()
+
+        # # 위치 초기화
+        # print(f"Moving to joint position: {x0}")
+        
+
+        # fry_in()
+        movej(x0, vel=VELOCITY, acc=ACC)
+        movel(flip_tool_after, vel=VELOCITY, acc=ACC)
+        movel(flip_home, vel=VELOCITY, acc=ACC)
+        movel(flip_ready[0], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movel(flip_ready[1], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movel(flip_final_ready, vel=VELOCITY, acc=ACC)
+        # print(f"Moving to joint position: {x0}")
+        
+        # # 도구 잡기
+        # grip_tool()
+
+        # # 패티를 그릴 위로 옮기기
+        # movel(patty_home, vel=VELOCITY, acc=ACC)
+        # ingredients_grip()
+        # pattty_to_grill()
+
+        # # 상단 빵 옮기기
+        # movel(bun_top_home, vel=VELOCITY, acc=ACC)
+        # ingredients_grip()
+        # ingredients_to_burger()
+        
+        # # 토핑1 옮기
+        # movel(topping1_home, vel=VELOCITY, acc=ACC)
+        # ingredients_grip()
+        # ingredients_to_burger()
+
+        # # 패티 뒤집기 
+        # release_tool()
+        # grip_flip_tool()
+        # flip()
+        # # release_flip_tool()
+        # movel(tool_after, vel=VELOCITY, acc=ACC)
+        # # # # 소스통 잡고 뿌리기
+        # movel(sauce_ready, vel=VELOCITY, acc=ACC)
+        # movel(sauce_final_ready, vel=VELOCITY, acc=ACC)
+        # sauce_setting()
+        
+
+        # # 도구1 잡기
+        # grip_tool()
+
+        # # 토핑2 옮기기
+        # movel(topping2_home, vel=VELOCITY, acc=ACC)
+        # ingredients_grip()
+        # ingredients_to_burger()
+
+        # # 구운 패티 트레이로 옮기기
+        # pick_patty()
+
+        # movel(bun_bottom_home, vel=VELOCITY, acc=ACC)
+        # ingredients_grip()
+        # ingredients_to_burger()
+
+        # release_tool()
+
+        # fry_out()
+        # fry_ingredients_setting()
+
+        # movej(x0, vel=VELOCITY, acc=ACC)
+        
+        # drink_setting()
+
+        # movej(x0, vel=VELOCITY, acc=ACC)
+
+    rclpy.shutdown()
 
 if __name__ == "__main__":
     main()
