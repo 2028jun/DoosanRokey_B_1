@@ -395,8 +395,6 @@ http://localhost:5173/ros_models/dsr_description2/meshes/m0609_white/MF0609_0_0.
 9. 실행 순서
 ============================================================
 
-가상 로봇으로 Admin 3D 모델 확인:
-
 1. m0609 + RG2 virtual bringup
 ros2 launch m0609_rg2_bringup bringup.launch.py mode:=virtual model:=m0609
 
