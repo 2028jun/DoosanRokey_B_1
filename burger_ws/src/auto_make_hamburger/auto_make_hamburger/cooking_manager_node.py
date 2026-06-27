@@ -4,7 +4,6 @@ from rclpy.action import ActionClient
 import collections
 from hamburger_interfaces.msg import OrderInfo
 from hamburger_interfaces.action import BurgerTask
-from hamburger_interfaces.srv import EmergencyStop 
 
 class CookingManagerNode(Node):
     def __init__(self):
@@ -79,6 +78,8 @@ class CookingManagerNode(Node):
         if msg.beverage_item != "NONE":
             korean_beverage = self.map_ingredient_name(msg.beverage_item)
             self.task_queue.extend([(msg.order_id, "음료수 옮기기", korean_beverage, "음료수_세팅지점")])
+
+        self.task_queue.extend([(msg.order_id, "종이빼기", "종이", "버거 세팅")])
 
         # 일을 완수하면 다음 동작 수행
         if not self.is_robot_busy:
@@ -177,17 +178,40 @@ class CookingManagerNode(Node):
         self.send_next_task()
 
     def insert_urgent_sequence(self, sequence):
-        insert_idx = 0
-        for i, task in enumerate(self.task_queue):  # 패티뒤집기와 튀김옮기기 타이머가 겹치면 순서대로 처리
-            if task[1] in ["패티뒤집기", "튀김옮기기"]:
-                insert_idx = i + 1
-            else:           # 나머지 작업은 뒤로 밀리며 패티뒤집기 혹은 튀김옮기기 먼저 처리
-                break
+        # 1. 들어온 긴급 작업 리스트(sequence)에서 타입별로 분류
+        fry_setting_tasks = [t for t in sequence if t[1] == "튀김세팅"]
+        other_urgent_tasks = [t for t in sequence if t[1] != "튀김세팅"]
 
-        for task in reversed(sequence):
+        # 2. 패티뒤집기, 튀김옮기기 등 일반 긴급 작업을 큐의 최전방 우선순위에 맞게 삽입
+        for task in reversed(other_urgent_tasks):
+            insert_idx = 0
+            for i, q_task in enumerate(self.task_queue):
+                if q_task[1] in ["패티뒤집기", "튀김옮기기"]:
+                    insert_idx = i + 1
+                else:
+                    break
             self.task_queue.insert(insert_idx, task)
 
-        if self.is_waiting_lock:
+        # 3. '튀김세팅' 작업이 존재할 경우 위치 지정 조 조립
+        if fry_setting_tasks:
+            # 현재 큐에 '음료수 옮기기'가 있는지 확인
+            has_beverage = any(q_task[1] == "음료수 옮기기" for q_task in self.task_queue)
+
+            if has_beverage:
+                # 🔄 음료수가 있다면: 음료수 바로 앞에 튀김세팅을 끼워넣기 위해 큐를 새로 빌드
+                new_queue = collections.deque()
+                for q_task in self.task_queue:
+                    if q_task[1] == "음료수 옮기기":
+                        # 음료수를 넣기 직전에 튀김세팅 작업들을 먼저 다 집어넣음
+                        new_queue.extend(fry_setting_tasks)
+                    new_queue.append(q_task)
+                self.task_queue = new_queue
+            else:
+                # ↩️ 음료수가 없다면: 맨 마지막(종이빼기 뒤쪽)에 추가
+                self.task_queue.extend(fry_setting_tasks)
+
+        # 4. 대기 중인 락 해제 및 다음 작업 실행 (비상정지 상태가 아닐 때만)
+        if (self.is_waiting_lock or not self.is_robot_busy):
             self.is_waiting_lock = False
             self.send_next_task()
 
@@ -208,10 +232,9 @@ class CookingManagerNode(Node):
             self.fry_timer.destroy()
             self.fry_timer = None
 
-        extract_sequence = [(self.current_order_id, "튀김옮기기", "튀김", "튀김기 세팅지점")]
+        extract_sequence = [(self.current_order_id, "튀김옮기기", "튀김", "튀김기 세팅지점"),
+                            (self.current_order_id, "튀김세팅", "튀김", "튀김 세팅지점")]
         self.insert_urgent_sequence(extract_sequence)
-
-        self.task_queue.append((self.current_order_id, "튀김세팅", "튀김", "튀김 세팅지점"))
         self.fry_running = False 
 
     def patty_done_callback(self):

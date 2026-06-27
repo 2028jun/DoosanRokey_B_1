@@ -57,12 +57,26 @@ x0 = [0, 0, 90, 0, 90, 0]   # 초기화 조인트 각도
 fry_plating_up = [779.03, 78.83, 196.43, 24.49, 92.43, 0.11]   # 튀김망 트레이 위로 올리기
 fry_back_home = [456.94, 395.29, 300.77, 85.97, 87.97, 1.78] # 튀김망 제자리로 이동
 
+sauce_home = [795.41, -62.28, 74.72, 168.75, -96.6, 89.5] # 소스통 잡기 준비
+sauce_pick = [869.76, -77.15, 66.2, 168.62, -96.43, 89.71] # 소스통 잡기
+sauce_ready = [838.65, 59.5, 386.38, 3.71, 100.86, -91.01] # 소스통 잡고 올리기
+sauce_final_ready = [821.36, 209.31, 203.91, 12.39, 91.77, -88.86] # 소스통 트레이 이동
+sauce_turn = [0, 0, 0, 0, 0, 180] # 소스통 트레이 위에서 뒤집기
+sauce_move = [[802.11, 276.99, 208.04, 17.15, 91.43, 92.42], [774.53, 266.42, 208.95, 17.04, 91.6, 92.3], [790.36, 211.68, 206.17, 16.66, 91.68, 92.15]] # 소스 뿌리기
+
+drink_home = [223.52, -177.16, 90.54, 55.78, -96.52, -86.74] # 음료 잡기 준비
+drink_pick = [201.34, -271.24, 69.21, 55.78, -96.52, -86.74] # 음료 잡기
+drink_middle = [422.34, -233.62, 229.59, 86.51, -90.51, -88.66] # 음료 옮기기 중간
+drink_ready = [881.73, 75.51, 127.47, 176.65, -92.08, -90.80] # 음료 내리기
+
+paper_pick_up = [677.38, 185.46, 256.88, 14.22, 165.4, 11.45] # 종이컵 쟁반 전후
+paper_pick = [754.25, 201.00, 59.27, 13.88, 167.11, 11.34]  # 종이컵 쟁반위
+paper_place = [215.13, 193.69, 76.71, 35.03, 180, 2.10]# 종이컵 초기, 마지막 위치 (추후 종이들고 조정)
+
 
 class RobotControllerNode:
     def __init__(self, node):
         self.node = node
-
-        self.hamburger_done = False
 
         # 두산 로봇 API 지연 임포트 및 바인딩
         self.init_robot_api(node)
@@ -75,9 +89,14 @@ class RobotControllerNode:
         self.FORCE_THRESHOLD = 35.0 # 외력 35이상 발생 시 비상정지
         self.is_emergency = False
 
+        self.current_goal_handle = None
+
+        self.move_fry_done = False
+        self.fry_setting = False
+
         self.srv = self.node.create_service(
             EmergencyStop, 
-            'emergency_stop_robot_controller', 
+            '/emergency_stop_robot_controller', 
             self.emergency_stop_callback  
         )
 
@@ -94,8 +113,24 @@ class RobotControllerNode:
         
         # 시작 시 로봇 홈 위치로 초기화 이동
         self.get_logger().info(f"초기 조인트 위치 이동중...: {x0}")
-        self.movej(x0, vel=VELOCITY, acc=ACC)
+        self.movej(x0, vel=50, acc=100)
         self.release()
+
+    def paper_grip(self):
+        self.movel(paper_pick_up, vel=VELOCITY, acc=ACC)
+        self.movel(paper_pick, vel=VELOCITY, acc=ACC)
+        self.grip()
+        self.movel(paper_pick_up, vel=VELOCITY, acc=ACC)
+        self.movel(paper_place, vel=VELOCITY, acc=ACC)
+        self.release()
+
+    def shake_oil(self):
+        self.move_periodic(amp =[10,0,0,0,0,0], period=0.5, atime=0.2, repeat=3, ref=self.DR_TOOL)
+
+    def shake_sauce(self):
+        self.movel(sauce_move[0], vel=VELOCITY, acc=ACC)
+        self.movel(sauce_move[1], vel=VELOCITY, acc=ACC)
+        self.movel(sauce_move[2], vel=VELOCITY, acc=ACC)
 
     def emergency_stop_callback(self, request, response):
         self.is_emergency = request.emergency_state
@@ -105,6 +140,11 @@ class RobotControllerNode:
             self.get_logger().error(f"🛑 비상정지 시스템 가동: {reason}")
             self.get_logger().error("⚠️ 로봇이 잠금 상태로 전환됩니다. 모든 모션 진입이 강제 차단됩니다.")
             self.drl_script_pause()
+
+            if self.current_goal_handle and self.current_goal_handle.is_active:
+                self.get_logger().warn("💥 [컨트롤러 방어] 현재 수행 중인 액션 목표를 중단(Abort) 처리합니다.")
+                self.current_goal_handle.abort()
+
             response.success = True
             response.message = "비상 정지 시스템 가동"
             return response
@@ -118,8 +158,8 @@ class RobotControllerNode:
             return response
 
     def publish_realtime_force(self):
-        if self.pending_tool_force_future and not self.pending_tool_force_future.done():
-            return
+        # if self.pending_tool_force_future and not self.pending_tool_force_future.done():
+        #     return
 
         if not self.tool_force_client.service_is_ready():
             return
@@ -198,16 +238,39 @@ class RobotControllerNode:
             self.get_logger().info(f"Wait for digital input: {sig_num}", throttle_duration_sec=2.0)
 
     def release(self):  # 그리퍼놓기
-        print("set for digital output 0 1 for release")
+        print("set for digital output 0 1 0 for release")
         self.set_digital_output(2, ON)
         self.set_digital_output(1, OFF)
-        self.wait_digital_input(2)
+        self.set_digital_output(3, OFF)
+        self.node_sleep(1)
 
-    def grip(self):   # 그리퍼 잡기  
-        print("set for digital output 1 0 for grip")
+    def grip(self): # 그리퍼 잡기
+        print("set for digital output 1 0 0 for grip")
         self.set_digital_output(1, ON)
         self.set_digital_output(2, OFF)
-        self.wait_digital_input(1)
+        self.set_digital_output(3, OFF)
+        self.node_sleep(1)
+
+    def source_grip(self): # 소스통 잡기
+        print("set for digital output 0 0 1 for grip")
+        self.set_digital_output(3, ON)
+        self.set_digital_output(1, OFF)
+        self.set_digital_output(2, OFF)
+        self.node_sleep(1)
+
+    def grip_soft(self): # 소스통 누르기, 음료 잡기
+        print("set for digital output 1 0 1 for grip")
+        self.set_digital_output(3, ON)
+        self.set_digital_output(1, ON)
+        self.set_digital_output(2, OFF)
+        self.node_sleep(1)
+
+    def release_wait(self):  # 소스, 음료용 그리퍼놓기
+        print("set for digital output 0 1 0 for release")
+        self.set_digital_output(2, ON)
+        self.set_digital_output(1, OFF)
+        self.set_digital_output(3, OFF)
+        self.node_sleep(1)
 
     def shake(self):
         self.move_periodic(amp=[0,0,-10,0,0,0], period=0.5, atime=0.2, repeat=3, ref=self.DR_TOOL)
@@ -285,6 +348,7 @@ class RobotControllerNode:
         self.movel(flip_ready[0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
         self.movel(flip_ready[1], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
         self.movel(flip_final_ready, vel=VELOCITY, acc=ACC)
+        self.movel([0, 25, 0, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
         self.movej([0, 0, 0, 0, 0, flip_angle], vel=100, acc=150, mod=self.DR_MV_MOD_REL)
         self.node_sleep(2)
         self.movel([30, 0, 0, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
@@ -313,11 +377,12 @@ class RobotControllerNode:
         self.movel(fry_home, vel=VELOCITY, acc=ACC)
 
     def fry_out(self):
-        self.movej(x0, vel=VELOCITY, acc=ACC)
+        self.movej(x0, vel=50, acc=100)
         self.movel(fry_grip, vel=VELOCITY, acc=ACC)
         self.movel(fry_pongdang[1], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
         self.grip()
         self.movel(fry_pongdang[0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
+        self.shake_oil()
         self.movel(fry_pongdang[3], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
         self.movel(fry_grip, vel=VELOCITY, acc=ACC)
         self.release()
@@ -334,15 +399,51 @@ class RobotControllerNode:
         self.movel(fry_grip, vel=VELOCITY, acc=ACC)
         self.release()
         self.movel(fry_home, vel=VELOCITY, acc=ACC)
+    
+    def sauce_setting(self):
+        self.movel(sauce_home, vel=VELOCITY, acc=ACC)
+        self.movel(sauce_pick, vel=VELOCITY, acc=ACC)
+        self.source_grip()
+        self.movel(sauce_ready, vel=VELOCITY, acc=ACC)
+        self.movel(sauce_final_ready, vel=VELOCITY, acc=ACC)
+        self.movej(sauce_turn, vel=VELOCITY, acc=ACC, mod=self.DR_MV_MOD_REL)
+        self.grip_soft()
+        self.shake_sauce()
+        self.source_grip()
+        self.movel(flip_tool_after, vel=50, acc=100)
+        self.movel(sauce_pick, vel=VELOCITY, acc=ACC)
+        self.release_wait()
+        self.movel(sauce_home, vel=VELOCITY, acc=ACC)
+        self.movej(x0, vel=50, acc=100)
+
+    def drink_setting(self):
+        self.movel(drink_home, vel=VELOCITY, acc=ACC)
+        self.movel(drink_pick, vel=VELOCITY, acc=ACC)
+        self.grip_soft()
+        self.movel(drink_middle, vel=VELOCITY, acc=ACC)
+        self.movel(drink_ready, vel=VELOCITY, acc=ACC)
+        self.movel([0, -50, 0, 0, 0, 0], vel=VELOCITY, acc=ACC ,ref=self.DR_TOOL)
+        self.release_wait()
+        self.movel([0, 0, -50, 0, 0, 0], vel=VELOCITY, acc=ACC ,ref=self.DR_TOOL)
+        self.movel(drink_middle, vel=VELOCITY, acc=ACC)
 
     # --- [상위 매니저 명령 수신 및 조율부] ---
     def execute_callback(self, goal_handle):
+        self.current_goal_handle = goal_handle
+
         order_id = goal_handle.request.order_id
         task = goal_handle.request.task_type        # 예: "PICK", "FLIP", "FRY" 등
         item = goal_handle.request.ingredient       # 예: "patty", "bun_top", "topping1" 등
         dest = goal_handle.request.destination
 
         self.get_logger().info(f'📥 [명령 접수] 주문:{order_id} | Task:{task} | 대상:{item}')
+
+        if self.is_emergency:
+            self.get_logger().error("❌ 현재 비상 정지 상태이므로 명령을 수행할 수 없습니다.")
+            goal_handle.abort()
+            result = BurgerTask.Result()
+            result.success = False
+            return result
 
         try:
             if task == "튀김조리":
@@ -352,7 +453,7 @@ class RobotControllerNode:
                     elif self.current_tool == "flip_tool":
                         self.release_flip_tool() 
                 self.fry_in()
-                self.movej(x0, vel=VELOCITY, acc=ACC)
+                self.movej(x0, vel=50, acc=100)
                 print(f"위치 초기화: {x0}") 
 
             # 1. 재료 조리 및 운반 태스크 매핑
@@ -371,8 +472,11 @@ class RobotControllerNode:
                     self.ingredients_grip()
                     self.ingredients_to_burger()
                     self.release_tool()
-                    self.movej(x0, vel=VELOCITY, acc=ACC)
-                    self.hamburger_done = True
+                    self.movej(x0, vel=50, acc=100)
+                    if self.move_fry_done is True:
+                        self.fry_setting = False
+                    else: 
+                        self.fry_setting = True
                 elif item == "토핑":
                     self.movel(topping1_home, vel=VELOCITY, acc=ACC)
                     self.ingredients_grip()
@@ -417,14 +521,16 @@ class RobotControllerNode:
                     elif self.current_tool == "flip_tool":
                         self.release_flip_tool() 
                 self.fry_out()
+                self.movej(x0, vel=50, acc=100)
+                self.move_fry_done = True
 
-                if self.hamburger_done is True:
+                if self.fry_setting is True:
                     self.movel(fry_grip, vel=VELOCITY, acc=ACC)
                     self.grip()
                     self.fry_ingredients_setting()
-                    self.movej(x0, vel=VELOCITY, acc=ACC)
+                    self.movej(x0, vel=50, acc=100)
             
-            elif (task == "튀김세팅" and self.hamburger_done == False):
+            elif (task == "튀김세팅" and self.fry_setting == False):
                 if self.current_tool is not None:
                     if self.current_tool == "tool":
                         self.release_tool()
@@ -436,7 +542,32 @@ class RobotControllerNode:
                 self.grip()
                 self.fry_ingredients_setting()
                 self.get_logger().info(f"초기 조인트 위치 이동중...: {x0}")
-                self.movej(x0, vel=VELOCITY, acc=ACC)
+                self.movej(x0, vel=50, acc=100)
+            
+            elif task == "소스뿌리기":
+                if self.current_tool is not None:
+                    if self.current_tool == "tool":
+                        self.release_tool()
+                    elif self.current_tool == "flip_tool":
+                        self.release_flip_tool() 
+                self.sauce_setting()
+            
+            elif task == "음료수 옮기기":
+                if self.current_tool is not None:
+                    if self.current_tool == "tool":
+                        self.release_tool()
+                    elif self.current_tool == "flip_tool":
+                        self.release_flip_tool() 
+                self.drink_setting()
+            
+            elif task == "종이빼기":
+                if self.current_tool is not None:
+                    if self.current_tool == "tool":
+                        self.release_tool()
+                    elif self.current_tool == "flip_tool":
+                        self.release_flip_tool() 
+                self.paper_grip()
+                self.movej(x0, vel=50, acc=100)
             
             else:
                 self.get_logger().error(f"알 수 없는 Task 요청입니다: {task}")
@@ -444,17 +575,29 @@ class RobotControllerNode:
                 result = BurgerTask.Result()
                 result.success = False
                 return result
+            
+            if self.is_emergency or not goal_handle.is_active:
+                self.get_logger().warn("🛑 작업 수행 중 비상정지가 인지되어 결과를 성공으로 전송하지 않습니다.")
+                result = BurgerTask.Result()
+                result.success = False
+                return result
 
-            # 구동 성공 후 상위 노드로 결과 리턴
+            # 구동 성공 후 상위 매니저 노드로 결과 리턴
             goal_handle.succeed()
             result = BurgerTask.Result()
             result.success = True
             self.get_logger().info(f'📤 [완료 통보] 주문 {order_id}의 {task} 작업 성공!')
+            
+            # 사용이 끝난 핸들 초기화
+            self.current_goal_handle = None
             return result
 
         except Exception as e:
-            self.get_logger().error(f"로봇 구동 중 예외 발생: {e}")
-            goal_handle.abort()
+            # 🛑 비상 정지(abort)로 인해 주행 중 예외가 터지면 이곳으로 들어와 스레드가 안전하게 종료됩니다.
+            self.get_logger().error(f"로봇 구동 중 중단 또는 예외 발생: {e}")
+            if goal_handle.is_active:
+                goal_handle.abort()
+            self.current_goal_handle = None
             result = BurgerTask.Result()
             result.success = False
             return result
