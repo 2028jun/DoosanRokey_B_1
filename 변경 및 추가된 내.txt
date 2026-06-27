@@ -379,10 +379,6 @@ burger_kiosk/index.html
 - ROS3D가 브라우저 전역 객체 window.ROSLIB, window.THREE, window.ROS3D를 사용하도록 함
 - 기존 직접 import 방식에서 발생한 Vite/Rolldown 빌드 오류를 피함
 
-주의:
-- CDN roslib@1은 ROS2TFClient가 없을 수 있음
-- 그래서 ROS2 TF action에는 AdminApp.jsx에서 import한 로컬 roslib 2.1.0을 별도로 사용함
-
 ============================================================
 4. 실행 순서
 ============================================================
@@ -402,55 +398,4 @@ ros2 run tf2_web_republisher tf2_web_republisher_node
 cd ~/rokey/pjt_heu/DoosanRokey_B_1/burger_kiosk
 npm run dev
 
-5. 브라우저 접속
-http://localhost:5173/admin
-
-6. Firefox 강력 새로고침
-Ctrl + Shift + R
-
-============================================================
-5. 확인 명령
-============================================================
-
-rosbridge 포트 확인:
-ss -ltnp | grep 9090
-
-TF topic 확인:
-ros2 topic list | grep tf
-ros2 topic echo /tf --once
-ros2 topic echo /tf_static --once
-
-robot_description 확인:
-ros2 param get /robot_state_publisher robot_description
-
-TF republisher action 확인:
-ros2 action list | grep tf
-
-정상 예시:
-/tf2_web_republisher
-
-mesh URL 확인 예시:
-http://localhost:5173/ros_models/dsr_description2/meshes/m0609_white/MF0609_0_0.dae
-
-브라우저 콘솔에서 정상에 가까운 로그:
-- THREE.WebGLRenderer ...
-- THREE.ColladaLoader: File version 1.4.1
-- THREE.ColladaLoader: Parse ...
-- THREE.ColladaLoader: Build ...
-
-무시 가능한 로그:
-- favicon.ico 404
-- React DevTools 안내
-- THREE.Loader: .extractUrlBase() has been deprecated
-
-============================================================
-6. 검증한 것
-============================================================
-
-- npm run build 정상 통과
-- /robot_state_publisher robot_description 값 확인
-- /tf, /tf_static 발행 확인
-- /tf2_web_republisher action 확인
-- mesh 파일 URL 200 OK 확인
-- ColladaLoader가 .dae mesh를 파싱하는 것 확인
 
