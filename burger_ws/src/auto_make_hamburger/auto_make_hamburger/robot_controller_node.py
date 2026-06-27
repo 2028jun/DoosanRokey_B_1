@@ -158,9 +158,6 @@ class RobotControllerNode:
             return response
 
     def publish_realtime_force(self):
-        # if self.pending_tool_force_future and not self.pending_tool_force_future.done():
-        #     return
-
         if not self.tool_force_client.service_is_ready():
             return
 

@@ -99,7 +99,7 @@ def main(args=None):
     drink_ready = [881.73, 75.51, 127.47, 176.65, -92.08, -90.80] # 음료 내리기
     
     paper_pick_up = [677.38, 185.46, 256.88, 14.22, 165.4, 11.45] # 종이컵 쟁반 전후
-    paper_pick = [754.25, 201.00, 59.27, 13.88, 167.11, 11.34]  # 종이컵 쟁반위
+    paper_pick = [742.57, 184.77, 49.09, 11.76, 170.47, -20.14] # 종이컵 쟁반위
     paper_place = [215.13, 193.69, 76.71, 35.03, 180, 2.10]# 종이컵 초기, 마지막 위치 (추후 종이들고 조정)
     x0 = [0, 0, 90, 0, 90, 0]   # 초기화 조인트 각도
 
@@ -115,6 +115,10 @@ def main(args=None):
         movel(paper_pick_up, vel=VELOCITY, acc=ACC)
         movel(paper_pick, vel=VELOCITY, acc=ACC)
         grip()
+        movej([1.5, 0, 0, 0, 0, 0], vel=100, acc=150, mod=DR_MV_MOD_REL)
+        movej([-1.5, 0, 0, 0, 0, 0], vel=100, acc=150, mod=DR_MV_MOD_REL)
+        movej([1.5, 0, 0, 0, 0, 0], vel=100, acc=150, mod=DR_MV_MOD_REL)
+        movej([-1.5, 0, 0, 0, 0, 0], vel=100, acc=150, mod=DR_MV_MOD_REL)
         movel(paper_pick_up, vel=VELOCITY, acc=ACC)
         movel(paper_place, vel=VELOCITY, acc=ACC)
         release()
@@ -328,12 +332,9 @@ def main(args=None):
         
 
         # fry_in()
+        release()
         movej(x0, vel=50, acc=100)
-        movel(drink_home, vel=VELOCITY, acc=ACC)
-        movel(drink_pick, vel=VELOCITY, acc=ACC)
-        grip_soft()
-        movel(drink_middle, vel=VELOCITY, acc=ACC)
-        movel(drink_ready, vel=VELOCITY, acc=ACC)
+        paper_grip()
         # movej(x0, vel=50, acc=100)
         # print(f"Moving to joint position: {x0}")
         
