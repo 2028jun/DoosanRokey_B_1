@@ -195,13 +195,13 @@ class CookingManagerNode(Node):
         # 3. '튀김세팅' 작업이 존재할 경우 위치 지정 조 조립
         if fry_setting_tasks:
             # 현재 큐에 '음료수 옮기기'가 있는지 확인
-            has_beverage = any(q_task[1] == "음료수옮기기" for q_task in self.task_queue)
+            has_beverage = any(q_task[1] == "음료수 옮기기" for q_task in self.task_queue)
 
             if has_beverage:
                 # 🔄 음료수가 있다면: 음료수 바로 앞에 튀김세팅을 끼워넣기 위해 큐를 새로 빌드
                 new_queue = collections.deque()
                 for q_task in self.task_queue:
-                    if q_task[1] == "음료수옮기기":
+                    if q_task[1] == "음료수 옮기기":
                         # 음료수를 넣기 직전에 튀김세팅 작업들을 먼저 다 집어넣음
                         new_queue.extend(fry_setting_tasks)
                     new_queue.append(q_task)
@@ -232,10 +232,9 @@ class CookingManagerNode(Node):
             self.fry_timer.destroy()
             self.fry_timer = None
 
-        extract_sequence = [(self.current_order_id, "튀김옮기기", "튀김", "튀김기 세팅지점")]
+        extract_sequence = [(self.current_order_id, "튀김옮기기", "튀김", "튀김기 세팅지점"),
+                            (self.current_order_id, "튀김세팅", "튀김", "튀김 세팅지점")]
         self.insert_urgent_sequence(extract_sequence)
-
-        self.task_queue.append((self.current_order_id, "튀김세팅", "튀김", "튀김 세팅지점"))
         self.fry_running = False 
 
     def patty_done_callback(self):

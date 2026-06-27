@@ -88,30 +88,45 @@ def main(args=None):
     sauce_home = [795.41, -62.28, 74.72, 168.75, -96.6, 89.5] # 소스통 잡기 준비
     sauce_pick = [869.76, -77.15, 66.2, 168.62, -96.43, 89.71] # 소스통 잡기
     sauce_ready = [838.65, 59.5, 386.38, 3.71, 100.86, -91.01] # 소스통 잡고 올리기
-    sauce_final_ready = [880.82, 204.73, 262.86, 13.02, 109.0, 88.72] # 소스통 잡고 뒤집기
-    sauce_real_final_ready = [880.29, 209.59, 209.57, 16.65, 109.25, 89.66] # 소스통 잡고 뒤집기 후   트레이 위로 이동
-    
-    sauce_move = [[890.35, 164.53, 184.12, 13.7, 110.75, 89.81], [861.68, 245.13, 177.03, 19.11, 111.69, 89.9], [912.29, 183.09, 173.33, 14.61, 110.14, 89.76], [885.53, 253.54, 175.8, 19.23, 110.49, 89.79]]
+    sauce_final_ready = [821.36, 209.31, 203.91, 12.39, 91.77, -88.86] # 소스통 트레이 이동
+    sauce_turn = [0, 0, 0, 0, 0, 180] # 소스통 트레이 위에서 뒤집기
+    sauce_move = [[802.11, 276.99, 208.04, 17.15, 91.43, 92.42], [774.53, 266.42, 208.95, 17.04, 91.6, 92.3], [790.36, 211.68, 206.17, 16.66, 91.68, 92.15]] # 소스 뿌리기
 
 
     drink_home = [223.52, -177.16, 90.54, 55.78, -96.52, -86.74] # 음료 잡기 준비
     drink_pick = [201.34, -271.24, 69.21, 55.78, -96.52, -86.74] # 음료 잡기
     drink_middle = [422.34, -233.62, 229.59, 86.51, -90.51, -88.66] # 음료 옮기기 중간
     drink_ready = [881.73, 75.51, 127.47, 176.65, -92.08, -90.80] # 음료 내리기
-
+    
+    paper_pick_up = [677.38, 185.46, 256.88, 14.22, 165.4, 11.45] # 종이컵 쟁반 전후
+    paper_pick = [742.57, 184.77, 49.09, 11.76, 170.47, -20.14] # 종이컵 쟁반위
+    paper_place = [215.13, 193.69, 76.71, 35.03, 180, 2.10]# 종이컵 초기, 마지막 위치 (추후 종이들고 조정)
     x0 = [0, 0, 90, 0, 90, 0]   # 초기화 조인트 각도
+
+    
 
     def shake():
         move_periodic(amp =[0,0,-10,0,0,0], period=0.5, atime=0.2, repeat=2, ref=DR_TOOL)
 
     def shake_oil():
         move_periodic(amp =[10,0,0,0,0,0], period=0.5, atime=0.2, repeat=3, ref=DR_TOOL)
+    
+    def paper_grip():
+        movel(paper_pick_up, vel=VELOCITY, acc=ACC)
+        movel(paper_pick, vel=VELOCITY, acc=ACC)
+        grip()
+        movej([1.5, 0, 0, 0, 0, 0], vel=100, acc=150, mod=DR_MV_MOD_REL)
+        movej([-1.5, 0, 0, 0, 0, 0], vel=100, acc=150, mod=DR_MV_MOD_REL)
+        movej([1.5, 0, 0, 0, 0, 0], vel=100, acc=150, mod=DR_MV_MOD_REL)
+        movej([-1.5, 0, 0, 0, 0, 0], vel=100, acc=150, mod=DR_MV_MOD_REL)
+        movel(paper_pick_up, vel=VELOCITY, acc=ACC)
+        movel(paper_place, vel=VELOCITY, acc=ACC)
+        release()
 
     def shake_sauce():
         movel(sauce_move[0], vel=VELOCITY, acc=ACC)
         movel(sauce_move[1], vel=VELOCITY, acc=ACC)
         movel(sauce_move[2], vel=VELOCITY, acc=ACC)
-        movel(sauce_move[3], vel=VELOCITY, acc=ACC)
 
     
     def wait_digital_input(sig_num):
@@ -285,14 +300,16 @@ def main(args=None):
         source_grip()
         movel(sauce_ready, vel=VELOCITY, acc=ACC)
         movel(sauce_final_ready, vel=VELOCITY, acc=ACC)
-        movel(sauce_real_final_ready, vel=VELOCITY, acc=ACC)
+        movej(sauce_turn, vel=VELOCITY, acc=ACC, mod=DR_MV_MOD_REL)
         grip_soft()
         shake_sauce()
         source_grip()
-        movel(sauce_ready, vel=VELOCITY, acc=ACC)
+        # movel(sauce_ready, vel=VELOCITY, acc=ACC)
+        movel(flip_tool_after, vel=50, acc=100)
         movel(sauce_pick, vel=VELOCITY, acc=ACC)
         release_wait()
         movel(sauce_home, vel=VELOCITY, acc=ACC)
+        movej(x0, vel=50, acc=100)
 
     def drink_setting():
         movel(drink_home, vel=VELOCITY, acc=ACC)
@@ -315,12 +332,10 @@ def main(args=None):
         
 
         # fry_in()
-        movej(x0, vel=VELOCITY, acc=ACC)
-        movel(flip_tool_after, vel=VELOCITY, acc=ACC)
-        movel(flip_home, vel=VELOCITY, acc=ACC)
-        movel(flip_ready[0], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
-        movel(flip_ready[1], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
-        movel(flip_final_ready, vel=VELOCITY, acc=ACC)
+        release()
+        movej(x0, vel=50, acc=100)
+        paper_grip()
+        # movej(x0, vel=50, acc=100)
         # print(f"Moving to joint position: {x0}")
         
         # # 도구 잡기

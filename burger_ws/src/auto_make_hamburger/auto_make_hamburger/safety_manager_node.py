@@ -24,6 +24,8 @@ class SafetyManagerNode(Node):
             10
         )
 
+        self.get_logger().info('안전 관리 매니저 노드 실행')
+
         self.is_emergency = False
 
     def trigger_all_nodes(self, state, reason):
@@ -46,10 +48,9 @@ class SafetyManagerNode(Node):
 
         # 리액트 관리자 UI 화면 문구 업데이트용 토픽 발행
         status_msg = String()
-        if reason == "External Force Detected":
-            str = '외력 감지!!'
-        status_msg.data = f"🚨 {str} +  비상 정지 시스템 가동: {reason}" if state else "🔄 정상 가동: 시스템 재개됨"
-        self.pub_status.publish(status_msg)
+        if reason == "외력 감지!! 비상 정지 시스템을 가동합니다.":
+            status_msg.data = f"🚨 비상 정지 시스템 가동: {reason}--------- 로봇을 확인해주세요."
+            self.pub_status.publish(status_msg)
 
     def hmi_emergency_callback(self, msg):
         if msg.data == True:
@@ -65,7 +66,7 @@ class SafetyManagerNode(Node):
     
         if msg.data == True:
             self.get_logger().error("💥 로봇 외력 감지! 비상 정지 시스템을 가동합니다.")
-            self.trigger_all_nodes(True, "External Force Detected")
+            self.trigger_all_nodes(True, "외력 감지!! 비상 정지 시스템을 가동합니다.")
 
 def main(args=None):
     rclpy.init(args=args)
