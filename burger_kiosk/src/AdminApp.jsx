@@ -174,7 +174,7 @@ function AdminApp() {
             angularThres: 0.01,
             transThres: 0.01,
             rate: 15.0,
-            serverName: '/dsr01/tf'
+            serverName: '/tf2_web_republisher'
           });
 
           getRobotDescription(rosInstance, 0, (robotDescription) => {
@@ -255,18 +255,6 @@ function AdminApp() {
           console.error(err);
         }
       });
-
-      completeTopic = new ROSLIB.Topic({
-        ros: instance,
-        name: '/burger_complete_topic',
-        messageType: 'std_msgs/msg/String'
-      });
-      completeTopic.subscribe(msg => {
-        if (isDisposed) return;
-        if (msg.data === "COMPLETE") {
-          console.log("버거 제조 완료 수신");
-        }
-      });
     };
 
     const connectRos = () => {
@@ -292,7 +280,6 @@ function AdminApp() {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (statusTopic) statusTopic.unsubscribe();
       if (telemetryTopic) telemetryTopic.unsubscribe();
-      if (completeTopic) completeTopic.unsubscribe();
       if (ros2TfInstance && ros2TfInstance !== rosInstance) ros2TfInstance.close();
       if (rosInstance) rosInstance.close();
       if (resizeObserver) resizeObserver.disconnect();

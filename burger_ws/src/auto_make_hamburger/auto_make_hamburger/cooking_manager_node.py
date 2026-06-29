@@ -19,31 +19,10 @@ class CookingManagerNode(Node):
 
         self.robot_action_client = ActionClient(self, BurgerTask, '/burger_task')
 
-        # ==========================================================
-        # 📊 [관리자 대시보드 연동용 채널 및 변수 신설]
-        # ==========================================================
-        # 1. 리액트가 애타게 기다리는 마스터 채널 최종 퍼블리셔 등록
-        
-        
-        # 2. 로봇 컨트롤러가 던져주는 하위 하드웨어 센서값 구독
-        # self.sensor_subscriber = self.create_subscription(
-        #     String, '/robot_raw_sensors', self.robot_sensor_callback, 10
-        # )
-        
-        # # 로봇 하드웨어 백업 저장 버퍼 변수
-        # self.rb_force = "0.0"
-        # self.rb_tool = "그리퍼 단독"
-        # self.rb_gripper = "RELEASE"
-
         # 진행률 추적용 독립 딕셔너리 정보 데이터 그룹
         self.total_predicted_tasks = {}  
         self.completed_task_counts = {}  
         self.current_progress_pct = 0    
-
-        # 현재 모션 상태 추적 실시간 전치 변수
-        # self.current_running_task = "대기 중"
-        # self.current_running_ingredient = "-"
-        # ==========================================================
 
         # 상태 및 С케줄링 관리 변수 (기존 변수 유지)
         self.task_queue = collections.deque()  
@@ -71,27 +50,6 @@ class CookingManagerNode(Node):
         self.last_destination = ""
 
         self.get_logger().info('🍳 [Cooking Manager] 햄버거 조리 작업 스케줄러 가동.')
-
-    # 🛠️ [신설] 로봇이 쏴주는 가상/실제 하드웨어 스펙 수신 콜백
-    # def robot_sensor_callback(self, msg):
-    #     try:
-    #         data = msg.data.split(',')
-    #         self.rb_force = data[0]
-    #         self.rb_tool = data[1]
-    #         self.rb_gripper = data[2]
-            
-    #         # 센서 데이터가 들어올 때마다 최신 공정 상태와 진행률을 조립해 리액트로 토스
-    #         self.publish_to_admin()
-    #     except:
-    #         pass
-
-    # 🛠️ [신설] 조립된 5분할 마스터 규격을 리액트로 최종 Publish 하는 마스터 함수
-    # def publish_to_admin(self):
-    #     # 규격: "외력,도구,그리퍼,작업명,재료명,진행률"
-    #     master_string = f"{self.rb_force},{self.rb_tool},{self.rb_gripper},{self.current_running_task},{self.current_running_ingredient},{self.current_progress_pct}"
-    #     msg = String()
-    #     msg.data = master_string
-    #     self.telemetry_pub.publish(msg)
 
     def order_callback(self, msg):      
         target_id = msg.order_id
@@ -158,11 +116,7 @@ class CookingManagerNode(Node):
             self.is_robot_busy = False
             self.is_waiting_lock = False
             self.current_order_id = 0
-            
-            # 공정이 완전히 끝나면 화면을 대기 중으로 세팅
-            # self.current_running_task = "대기 중"
-            # self.current_running_ingredient = "-"
-            # self.publish_to_admin()
+
             return
 
         next_order_id = self.task_queue[0][0]
@@ -182,11 +136,6 @@ class CookingManagerNode(Node):
         self.last_task = task_type
         self.last_ingredient = ingredient
         self.last_destination = destination
-
-        # ⚡ [실시간 공정 트래킹 업데이트] 로봇에게 액션을 넘기기 전에 현재 진행 공정 최신화
-        # self.current_running_task = task_type
-        # self.current_running_ingredient = ingredient
-        # # self.publish_to_admin()
 
         if not self.robot_action_client.wait_for_server(timeout_sec=5.0):
             self.get_logger().error('❌ /burger_task 액션 서버가 응답하지 않습니다.')
@@ -224,14 +173,6 @@ class CookingManagerNode(Node):
             return
         
         captured_id = self.last_order_id
-        
-        # 📈 [진행률 분자 계산] 액션이 성공적으로 수행 완료되면 카운트 업
-        # if captured_id in self.completed_task_counts:
-        #     self.completed_task_counts[captured_id] += 1
-        #     total = self.total_predicted_tasks.get(captured_id, 1)
-        #     current = self.completed_task_counts[captured_id]
-        #     self.current_progress_pct = min(int((current / total) * 100), 100)
-        #     self.publish_to_admin()
 
         if self.last_task == "튀김 조리" and self.last_ingredient == "튀김" and self.last_destination == "튀김기":
             self.get_logger().info(f'🍟 [주문 {captured_id}] 튀김망 투입 완료! 5분 감자튀김 타이머 가동.')
@@ -254,11 +195,6 @@ class CookingManagerNode(Node):
     def insert_urgent_sequence(self, sequence):
         if not sequence: return
         target_oid = sequence[0][0]
-        
-        # ⚡ [실시간 공정 인터럽트 트래킹] 타이머 스케줄이 터져서 새 모션이 기습 주입될 때도 화면 갱신
-        # self.current_running_task = sequence[0][1]
-        # self.current_running_ingredient = sequence[0][2]
-        # self.publish_to_admin()
 
         fry_setting_tasks = [t for t in sequence if t[1] == "튀김 세팅"]
         other_urgent_tasks = [t for t in sequence if t[1] != "튀김 세팅"]
@@ -313,7 +249,7 @@ class CookingManagerNode(Node):
             self.fry_timers[order_id].destroy()
             del self.fry_timers[order_id]
 
-        extract_sequence = [(order_id, "튀김 옮기기", "튀김", "튀김기 세팅지점"),
+        extract_sequence = [(order_id, "튀김 꺼내기", "튀김", "튀김기 세팅지점"),
                             (order_id, "튀김 세팅", "튀김", "튀김 세팅지점")]
         self.insert_urgent_sequence(extract_sequence)
         self.fry_running[order_id] = False 
