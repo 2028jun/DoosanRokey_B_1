@@ -3,6 +3,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Bool, String
 from hamburger_interfaces.srv import EmergencyStop
+from dsr_msgs2.srv import MoveStop
 
 class SafetyManagerNode(Node):
     def __init__(self):
@@ -24,15 +25,34 @@ class SafetyManagerNode(Node):
             10
         )
 
+        self.move_stop_clients = [
+            ('/motion/move_stop', self.create_client(MoveStop, '/motion/move_stop')),
+            ('/dsr01/motion/move_stop', self.create_client(MoveStop, '/dsr01/motion/move_stop')),
+        ]
+
         self.get_logger().info('안전 관리 매니저 노드 실행')
 
         self.is_emergency = False
+
+    def request_motion_stop(self):
+        for service_name, client in self.move_stop_clients:
+            if client.service_is_ready():
+                req = MoveStop.Request()
+                req.stop_mode = 0
+                client.call_async(req)
+                self.get_logger().error(f"🚨 {service_name} 즉시 정지 요청을 전송했습니다.")
+                return
+
+        self.get_logger().error("❌ move_stop 서비스가 준비되지 않아 즉시 정지 요청을 보내지 못했습니다. (/motion, /dsr01/motion 모두 실패)")
 
     def trigger_all_nodes(self, state, reason):
         if self.is_emergency == state:
             return
         
         self.is_emergency = state
+
+        if state:
+            self.request_motion_stop()
         
         # 로봇 컨트롤러 노드로 비상정지 서비스 요청 전송
         req = EmergencyStop.Request()

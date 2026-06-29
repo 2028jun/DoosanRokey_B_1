@@ -3,7 +3,7 @@ import rclpy
 from rclpy.action import ActionServer
 from hamburger_interfaces.action import BurgerTask
 from hamburger_interfaces.srv import EmergencyStop
-from dsr_msgs2.srv import GetToolForce
+from dsr_msgs2.srv import GetToolForce, MoveStop
 import DR_init
 from std_msgs.msg import Bool, String
 
@@ -98,6 +98,8 @@ class RobotControllerNode:
         self.current_running_task = ""
         self.current_running_ingredient = ""
 
+        self.move_stop_client = self.node.create_client(MoveStop, '/motion/move_stop')
+
         self.srv = self.node.create_service(
             EmergencyStop, 
             '/emergency_stop_robot_controller', 
@@ -123,6 +125,16 @@ class RobotControllerNode:
         self.get_logger().info(f"초기 조인트 위치 이동중...: {x0}")
         self.movej(x0, vel=50, acc=100)
         self.release()
+
+    def request_motion_stop(self):
+        if not self.move_stop_client.service_is_ready():
+            self.get_logger().error("서비스가 준비되지 않아 모션 정지 요청을 보내지 못했습니다.")
+            return
+
+        request = MoveStop.Request()
+        request.stop_mode = 0  # DR_QSTOP_STO: 현재 모션을 가장 빠르게 정지
+        self.move_stop_client.call_async(request)
+        self.get_logger().error("🚨 motion/move_stop 급정지 요청을 전송했습니다.")
 
     def publish_telemetry(self):
         force_val = round(self.current_force_magnitude, 2)  
@@ -163,7 +175,8 @@ class RobotControllerNode:
         if self.is_emergency is True:
             self.get_logger().error(f"🛑 비상정지 시스템 가동: {reason}")
             self.get_logger().error("⚠️ 로봇이 잠금 상태로 전환됩니다. 모든 명령이 강제 차단됩니다.")
-            self.drl_script_stop(1) 
+            self.request_motion_stop()
+            self.drl_script_stop(0)
             self.drl_script_pause()
 
             if self.current_goal_handle and self.current_goal_handle.is_active:
