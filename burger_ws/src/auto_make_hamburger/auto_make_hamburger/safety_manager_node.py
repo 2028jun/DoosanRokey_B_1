@@ -64,7 +64,7 @@ class SafetyManagerNode(Node):
             self.trigger_all_nodes(False, "관리자 버튼 해제")
 
     def force_callback(self, msg):
-        if self.is_emergency or msg.data == False:
+        if self.is_emergency or not msg.data:
             return
     
         if msg.data == True:

@@ -1,12 +1,9 @@
 # Goal
-int32 order_id       # 주문 번호
-string task_type     # 로봇의 행동 (예: 집고 옮기기, 도구집기, 뒤집기)
-string ingredient    # 💡 조리 대상 / 재료 (예: 패티, 감자튀김, 요리용_집게)
-string destination   # 💡 목적지 (예: 그릴, 튀김기, 접시, 버거, NONE)
+int32 order_id       
+string task_type     
+string ingredient    
 ---
 # 2. Result (최종 완료 결과)
 bool success
 ---
 # 3. Feedback (실시간 상태 피드백)
-string current_status
-float32 progress # 현재 진행률

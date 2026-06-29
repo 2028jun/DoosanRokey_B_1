@@ -1,13 +1,11 @@
 # 📄 cooking_manager_node.py 전체 반영본
 
-from math import sqrt
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 import collections
 from hamburger_interfaces.msg import OrderInfo
 from hamburger_interfaces.action import BurgerTask
-from std_msgs.msg import String  # ★ String 메시지 타입 추가
 
 class CookingManagerNode(Node):
     def __init__(self):
@@ -18,11 +16,6 @@ class CookingManagerNode(Node):
         )
 
         self.robot_action_client = ActionClient(self, BurgerTask, '/burger_task')
-
-        # 진행률 추적용 독립 딕셔너리 정보 데이터 그룹
-        self.total_predicted_tasks = {}  
-        self.completed_task_counts = {}  
-        self.current_progress_pct = 0    
 
         # 상태 및 С케줄링 관리 변수 (기존 변수 유지)
         self.task_queue = collections.deque()  
@@ -67,10 +60,10 @@ class CookingManagerNode(Node):
         self.fry_running[target_id] = False
 
         if msg.side_item != "NONE":
-            self.task_queue.extend([(target_id, "튀김 조리", "튀김", "튀김기")])
+            self.task_queue.extend([(target_id, "튀김 조리", "튀김")])
             self.fry_running[target_id] = True
 
-        self.task_queue.extend([(target_id, "패티 조리", "패티", "그릴")])
+        self.task_queue.extend([(target_id, "패티 조리", "패티")])
 
         for ingredient in msg.ingredients:
             if ingredient == "SAUCE":
@@ -81,24 +74,13 @@ class CookingManagerNode(Node):
                 continue
             
             korean_name = self.map_ingredient_name(ingredient)
-            self.task_queue.extend([(target_id, "재료 옮기기", korean_name, "버거 세팅지점")])
+            self.task_queue.extend([(target_id, "재료 옮기기", korean_name)])
 
         if msg.beverage_item != "NONE":
             korean_beverage = self.map_ingredient_name(msg.beverage_item)
-            self.task_queue.extend([(target_id, "음료수 옮기기", korean_beverage, "음료수_세팅지점")])
+            self.task_queue.extend([(target_id, "음료수 옮기기", korean_beverage)])
 
-        self.task_queue.extend([(target_id, "종이 빼기", "종이", "버거 세팅")])
-
-        # 📈 진행률 분모 예측 규칙 적용
-        base_task_count = len([t for t in self.task_queue if t[0] == target_id])
-        predicted_interrupt_count = 1  # 패티뒤집기
-        if self.sauce[target_id]: predicted_interrupt_count += 1 # 소스뿌리기
-        if msg.side_item != "NONE": predicted_interrupt_count += 2 # 튀김옮기기+튀김세팅
-        predicted_interrupt_count += 1 # 최종 버거적재
-
-        self.total_predicted_tasks[target_id] = base_task_count + predicted_interrupt_count
-        self.completed_task_counts[target_id] = 0
-        self.current_progress_pct = 0
+        self.task_queue.extend([(target_id, "종이 빼기", "종이")])
 
         if not self.is_robot_busy:
             self.send_next_task()
@@ -129,27 +111,25 @@ class CookingManagerNode(Node):
         self.is_waiting_lock = False
         self.is_robot_busy = True
 
-        order_id, task_type, ingredient, destination = self.task_queue.popleft()
+        order_id, task_type, ingredient = self.task_queue.popleft()
         self.current_order_id = order_id
 
         self.last_order_id = order_id 
         self.last_task = task_type
         self.last_ingredient = ingredient
-        self.last_destination = destination
 
         if not self.robot_action_client.wait_for_server(timeout_sec=5.0):
             self.get_logger().error('❌ /burger_task 액션 서버가 응답하지 않습니다.')
             self.is_robot_busy = False
-            self.task_queue.appendleft((order_id, task_type, ingredient, destination))
+            self.task_queue.appendleft((order_id, task_type, ingredient))
             return
 
         goal_msg = BurgerTask.Goal()
         goal_msg.order_id = order_id
         goal_msg.task_type = task_type
         goal_msg.ingredient = ingredient
-        goal_msg.destination = destination
 
-        self.get_logger().info(f'🤖 [명령 전송] 행동:{task_type} | 대상:{ingredient} | 목적지:{destination}')
+        self.get_logger().info(f'🤖 [명령 전송] 주문번호: {order_id} | 행동:{task_type} | 대상:{ingredient}')
 
         send_goal_future = self.robot_action_client.send_goal_async(goal_msg)
         send_goal_future.add_done_callback(self.goal_response_callback)
@@ -158,7 +138,7 @@ class CookingManagerNode(Node):
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.get_logger().error('❌ [명령 거부됨] 대기열 복구 후 재시도합니다.')
-            self.task_queue.appendleft((self.current_order_id, self.last_task, self.last_ingredient, self.last_destination))
+            self.task_queue.appendleft((self.current_order_id, self.last_task, self.last_ingredient))
             self.is_robot_busy = False
             return
             
@@ -174,19 +154,19 @@ class CookingManagerNode(Node):
         
         captured_id = self.last_order_id
 
-        if self.last_task == "튀김 조리" and self.last_ingredient == "튀김" and self.last_destination == "튀김기":
+        if self.last_task == "튀김 조리" and self.last_ingredient == "튀김":
             self.get_logger().info(f'🍟 [주문 {captured_id}] 튀김망 투입 완료! 5분 감자튀김 타이머 가동.')
             self.fry_timers[captured_id] = self.create_timer(300.0, lambda: self.fry_done_callback(captured_id))
             
-        elif self.last_task == "패티 조리" and self.last_ingredient == "패티" and self.last_destination == "그릴":
+        elif self.last_task == "패티 조리" and self.last_ingredient == "패티":
             self.get_logger().info(f'🥩 [주문 {captured_id}] 패티 그릴 안착 완료! 1분 뒤집기 타이머 구동.')
             self.patty_flip_timers[captured_id] = self.create_timer(60.0, lambda: self.patty_flip_callback(captured_id)) 
             
-        elif self.last_task == "패티 뒤집기" and self.last_ingredient == "패티" and self.last_destination == "그릴":
+        elif self.last_task == "패티 뒤집기" and self.last_ingredient == "패티":
             self.get_logger().info(f'🔄 [주문 {captured_id}] 패티 뒤집기 완료 확인! 후반전 조리 타이머 가동.')
             self.patty_second_half_timers[captured_id] = self.create_timer(60.0, lambda: self.patty_done_callback(captured_id)) 
 
-        elif self.last_task == "재료 옮기기" and self.last_ingredient == "패티" and self.last_destination == "버거 세팅지점":
+        elif self.last_task == "재료 옮기기" and self.last_ingredient == "패티":
             self.get_logger().info(f'✨ [락 해제] [주문 {captured_id}] 패티가 결합되었습니다. 상단 빵 조립 락을 해제합니다.')
             self.is_patty_cooked_and_placed[captured_id] = True
 
@@ -221,7 +201,7 @@ class CookingManagerNode(Node):
                 new_queue = collections.deque()
                 inserted = False
                 for q_task in self.task_queue:
-                    if q_task[0] == target_oid and q_task[1] == "종이  빼기":
+                    if q_task[0] == target_oid and q_task[1] == "종이 빼기":
                         new_queue.extend(fry_setting_tasks)
                         inserted = True
                     new_queue.append(q_task)
@@ -238,9 +218,9 @@ class CookingManagerNode(Node):
             self.patty_flip_timers[order_id].destroy()
             del self.patty_flip_timers[order_id]
 
-        urgent_sequence = [(order_id, "패티 뒤집기", "패티", "그릴")]
+        urgent_sequence = [(order_id, "패티 뒤집기", "패티")]
         if self.sauce.get(order_id, False):      
-            urgent_sequence.append((order_id, "소스 뿌리기", "소스", "버거_세팅지점"))
+            urgent_sequence.append((order_id, "소스 뿌리기", "소스"))
         self.insert_urgent_sequence(urgent_sequence)
 
     def fry_done_callback(self, order_id):
@@ -249,8 +229,8 @@ class CookingManagerNode(Node):
             self.fry_timers[order_id].destroy()
             del self.fry_timers[order_id]
 
-        extract_sequence = [(order_id, "튀김 꺼내기", "튀김", "튀김기 세팅지점"),
-                            (order_id, "튀김 세팅", "튀김", "튀김 세팅지점")]
+        extract_sequence = [(order_id, "튀김 꺼내기", "튀김"),
+                            (order_id, "튀김 세팅", "튀김")]
         self.insert_urgent_sequence(extract_sequence)
         self.fry_running[order_id] = False 
 
@@ -260,7 +240,7 @@ class CookingManagerNode(Node):
             self.patty_second_half_timers[order_id].destroy()
             del self.patty_second_half_timers[order_id]
 
-        patty_sequence = [(order_id, "재료 옮기기", "패티", "버거 세팅지점")]
+        patty_sequence = [(order_id, "재료 옮기기", "패티")]
         self.insert_urgent_sequence(patty_sequence)
 
     def map_ingredient_name(self, eng_name):

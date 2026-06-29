@@ -255,6 +255,18 @@ function AdminApp() {
           console.error(err);
         }
       });
+
+      completeTopic = new ROSLIB.Topic({
+        ros: instance,
+        name: '/burger_complete_topic',
+        messageType: 'std_msgs/msg/String'
+      });
+      completeTopic.subscribe(msg => {
+        if (isDisposed) return;
+        if (msg.data === "COMPLETE") {
+          console.log("버거 제조 완료 수신");
+        }
+      });
     };
 
     const connectRos = () => {
@@ -280,6 +292,7 @@ function AdminApp() {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (statusTopic) statusTopic.unsubscribe();
       if (telemetryTopic) telemetryTopic.unsubscribe();
+      if (completeTopic) completeTopic.unsubscribe();
       if (ros2TfInstance && ros2TfInstance !== rosInstance) ros2TfInstance.close();
       if (rosInstance) rosInstance.close();
       if (resizeObserver) resizeObserver.disconnect();
@@ -371,7 +384,7 @@ function AdminApp() {
         <div style={{ background: '#141311', padding: '20px', borderRadius: '8px', border: '1px solid #29241c' }}>
           <h3 style={{ marginTop: 0, color: '#ffb703', fontSize: '15px', marginBottom: '15px' }}>⚡ 실시간 하드웨어 모니터링</h3>
           <p style={{ fontSize: '14px', margin: '8px 0', color: '#a89a83' }}>
-            실시간 측정 외력: <strong style={{ color: '#2ecc71', fontSize: '18px' }}>{currentForce.toFixed(1)} N</strong> / 15.0 N
+            실시간 측정 외력: <strong style={{ color: '#2ecc71', fontSize: '18px' }}>{currentForce.toFixed(1)} N</strong> / 30.0 N
           </p>
           <p style={{ fontSize: '14px', margin: '8px 0', color: '#a89a83' }}>장착된 도구: <strong style={{ color: '#fff' }}>{currentTool}</strong></p>
           <p style={{ fontSize: '14px', margin: '8px 0', color: '#a89a83' }}>

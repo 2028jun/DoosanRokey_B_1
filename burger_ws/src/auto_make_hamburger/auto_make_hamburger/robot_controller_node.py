@@ -6,7 +6,6 @@ from hamburger_interfaces.srv import EmergencyStop
 from dsr_msgs2.srv import GetToolForce
 import DR_init
 from std_msgs.msg import Bool, String
-import sys
 
 # --- [로봇 기본 설정 및 전역 변수] ---
 ROBOT_ID = "dsr01"
@@ -87,7 +86,7 @@ class RobotControllerNode:
         self.pending_tool_force_future = None
 
         self.force_monitor_timer = self.node.create_timer(0.1, self.publish_realtime_force)    # 외력을 계속 계산
-        self.FORCE_THRESHOLD = 30.0 # 외력 20이상 발생 시 비상정지
+        self.FORCE_THRESHOLD = 30.0 # 외력 30이상 발생 시 비상정지
         self.is_emergency = False
 
         self.current_goal_handle = None
@@ -145,10 +144,6 @@ class RobotControllerNode:
         self.movel(paper_pick_up, vel=VELOCITY, acc=ACC)
         self.movel(paper_pick, vel=VELOCITY, acc=ACC)
         self.grip()
-        self.movej([1.5, 0, 0, 0, 0, 0], vel=20, acc=30, mod=self.DR_MV_MOD_REL)
-        self.movej([-1.5, 0, 0, 0, 0, 0], vel=20, acc=30, mod=self.DR_MV_MOD_REL)
-        self.movej([1.5, 0, 0, 0, 0, 0], vel=20, acc=30, mod=self.DR_MV_MOD_REL)
-        self.movej([-1.5, 0, 0, 0, 0, 0], vel=20, acc=30, mod=self.DR_MV_MOD_REL)
         self.movel(paper_pick_up, vel=VELOCITY, acc=ACC)
         self.movel(paper_place, vel=VELOCITY, acc=ACC)
         self.release()
@@ -168,7 +163,7 @@ class RobotControllerNode:
         if self.is_emergency is True:
             self.get_logger().error(f"🛑 비상정지 시스템 가동: {reason}")
             self.get_logger().error("⚠️ 로봇이 잠금 상태로 전환됩니다. 모든 명령이 강제 차단됩니다.")
-            self.drl_script_stop(0) 
+            self.drl_script_stop(1) 
             self.drl_script_pause()
 
             if self.current_goal_handle and self.current_goal_handle.is_active:
@@ -326,7 +321,7 @@ class RobotControllerNode:
         self.release()
         self.movel(tool_after, vel=VELOCITY, acc=ACC)
         self.current_tool = None
-        self.current_tool_hmi = None
+        self.current_tool_hmi = "맨손"
 
     def grip_flip_tool(self):    # 뒤집기 도구 잡기
         self.movel(tool_after, vel=VELOCITY, acc=ACC)
@@ -344,7 +339,7 @@ class RobotControllerNode:
         self.release()
         self.movel(flip_tool_after, vel=VELOCITY, acc=ACC)
         self.current_tool = None
-        self.current_tool_hmi = "None"
+        self.current_tool_hmi = "맨손"
 
     # --- [재료 공급 및 가공 모션 시퀀스] ---
     def ingredients_grip(self):
@@ -451,7 +446,7 @@ class RobotControllerNode:
         self.movel(flip_tool_after, vel=50, acc=100)
         self.movel(sauce_pick, vel=VELOCITY, acc=ACC)
         self.release_wait()
-        self.current_tool_hmi = None
+        self.current_tool_hmi = "맨손"
         self.movel(sauce_home, vel=VELOCITY, acc=ACC)
         self.movej(x0, vel=50, acc=100)
 
@@ -464,7 +459,7 @@ class RobotControllerNode:
         self.movel(drink_ready, vel=VELOCITY, acc=ACC)
         self.movel([0, -50, 0, 0, 0, 0], vel=VELOCITY, acc=ACC ,ref=self.DR_TOOL)
         self.release_wait()
-        self.current_tool_hmi = None
+        self.current_tool_hmi = "맨손"
         self.movel([0, 0, -50, 0, 0, 0], vel=VELOCITY, acc=ACC ,ref=self.DR_TOOL)
         self.movel(drink_middle, vel=VELOCITY, acc=ACC)
 
@@ -475,7 +470,6 @@ class RobotControllerNode:
         order_id = goal_handle.request.order_id
         task = goal_handle.request.task_type        
         item = goal_handle.request.ingredient       
-        dest = goal_handle.request.destination
 
         self.current_running_task = task
         self.current_running_ingredient = item
@@ -627,6 +621,8 @@ class RobotControllerNode:
                 return result
 
             # 구동 성공 후 상위 매니저 노드로 결과 리턴
+            self.current_running_task = ""
+            self.current_running_ingredient = ""
             goal_handle.succeed()
             result = BurgerTask.Result()
             result.success = True

@@ -373,7 +373,7 @@ function App() {
           <div style={{ fontSize: '100px', marginBottom: '20px' }}>🍔</div>
           <h2 style={styles.successTitle}>주문 완료!</h2>
           <p style={styles.successDesc}>잠시 후 맛있는 버거와 사이드 메뉴가 완성됩니다.</p>
-          <div style={styles.waitTimeBadge}>예상 대기시간 <span style={{color: '#ffb703'}}>12분</span></div>
+          <div style={styles.waitTimeBadge}>맛있는 버거가 조리중이에요... 조금만 기다려주세요 <span style={{color: '#ffb703'}}>*^^*/</span></div>
           <div style={styles.orderInfoBox}><div style={styles.infoRow}><span style={{color: '#ffb703'}}>📍</span> 서울 마포구 버거거리 12번지</div><div style={styles.infoRow}><span style={{color: '#888', fontSize: '13px'}}>주문번호 480-8154</span></div></div>
           <button onClick={handleReset} style={styles.resetButton}>새로 주문하기</button>
         </main>
