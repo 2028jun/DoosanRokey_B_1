@@ -57,7 +57,7 @@
 
 ### 1-2. 플로우 차트 (Flow Chart)
 <p align="center">
-  <img src="./flow_chart.png" alt="플로우 차트 이미지" width="1000" height="1400" style="background-color:white">
+  <img src="./flow_chart1.png" alt="플로우 차트 이미지" width="1000" height="1400" style="background-color:white">
 </p>
 ---
 
