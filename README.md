@@ -10,6 +10,8 @@ sudo apt install ros-humble-rosbridge-suite
 
 sudo apt-get install -y ros-humble-tf2-web-republisher
 
++ burger_kiosk/ros_models 폴더내에 dsr_descriptions2, m0609_rg2_bringup, onrobot_rg_description 링크 파일 생성하기
+
 
 
 실행 방법
