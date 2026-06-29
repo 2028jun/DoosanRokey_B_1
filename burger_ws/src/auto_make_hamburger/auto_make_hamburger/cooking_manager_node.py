@@ -1,9 +1,13 @@
+# 📄 cooking_manager_node.py 전체 반영본
+
+from math import sqrt
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 import collections
 from hamburger_interfaces.msg import OrderInfo
 from hamburger_interfaces.action import BurgerTask
+from std_msgs.msg import String  # ★ String 메시지 타입 추가
 
 class CookingManagerNode(Node):
     def __init__(self):
@@ -15,81 +19,137 @@ class CookingManagerNode(Node):
 
         self.robot_action_client = ActionClient(self, BurgerTask, '/burger_task')
 
-        # 상태 및 스케줄링 관리 변수
-        self.task_queue = collections.deque()  # FIFO 큐
+        # ==========================================================
+        # 📊 [관리자 대시보드 연동용 채널 및 변수 신설]
+        # ==========================================================
+        # 1. 리액트가 애타게 기다리는 마스터 채널 최종 퍼블리셔 등록
+        
+        
+        # 2. 로봇 컨트롤러가 던져주는 하위 하드웨어 센서값 구독
+        # self.sensor_subscriber = self.create_subscription(
+        #     String, '/robot_raw_sensors', self.robot_sensor_callback, 10
+        # )
+        
+        # # 로봇 하드웨어 백업 저장 버퍼 변수
+        # self.rb_force = "0.0"
+        # self.rb_tool = "그리퍼 단독"
+        # self.rb_gripper = "RELEASE"
+
+        # 진행률 추적용 독립 딕셔너리 정보 데이터 그룹
+        self.total_predicted_tasks = {}  
+        self.completed_task_counts = {}  
+        self.current_progress_pct = 0    
+
+        # 현재 모션 상태 추적 실시간 전치 변수
+        # self.current_running_task = "대기 중"
+        # self.current_running_ingredient = "-"
+        # ==========================================================
+
+        # 상태 및 С케줄링 관리 변수 (기존 변수 유지)
+        self.task_queue = collections.deque()  
         self.is_robot_busy = False             
         self.current_order_id = 0              
 
         # 타이머 변수
-        self.fry_timer = None
-        self.patty_flip_timer = None          
-        self.patty_second_half_timer = None   
+        self.fry_timers = {}
+        self.patty_flip_timers = {}          
+        self.patty_second_half_timers = {}   
 
         # 의존성 제어 플래그
-        self.is_fry_cooked_and_placed = False
-        self.is_patty_cooked_and_placed = False
+        self.is_fry_cooked_and_placed = {}
+        self.is_patty_cooked_and_placed = {}
         self.is_waiting_lock = False           
 
         # 다중 메뉴 상태 플래그
-        self.sauce = False
-        self.fry_running = False  # 현재 튀김기가 작동 중인지 여부
+        self.sauce = {}
+        self.fry_running = {}  
 
         # 직전 작업 정보 기록용 변수
+        self.last_order_id = 0  
         self.last_task = ""
         self.last_ingredient = ""
         self.last_destination = ""
 
-        self.get_logger().info('🍳 [Cooking Manager] 규칙 기반 완전 무결성 스케줄러 가동.')
+        self.get_logger().info('🍳 [Cooking Manager] 햄버거 조리 작업 스케줄러 가동.')
 
-    def order_callback(self, msg):      # 작업을 큐에 추가
+    # 🛠️ [신설] 로봇이 쏴주는 가상/실제 하드웨어 스펙 수신 콜백
+    # def robot_sensor_callback(self, msg):
+    #     try:
+    #         data = msg.data.split(',')
+    #         self.rb_force = data[0]
+    #         self.rb_tool = data[1]
+    #         self.rb_gripper = data[2]
+            
+    #         # 센서 데이터가 들어올 때마다 최신 공정 상태와 진행률을 조립해 리액트로 토스
+    #         self.publish_to_admin()
+    #     except:
+    #         pass
+
+    # 🛠️ [신설] 조립된 5분할 마스터 규격을 리액트로 최종 Publish 하는 마스터 함수
+    # def publish_to_admin(self):
+    #     # 규격: "외력,도구,그리퍼,작업명,재료명,진행률"
+    #     master_string = f"{self.rb_force},{self.rb_tool},{self.rb_gripper},{self.current_running_task},{self.current_running_ingredient},{self.current_progress_pct}"
+    #     msg = String()
+    #     msg.data = master_string
+    #     self.telemetry_pub.publish(msg)
+
+    def order_callback(self, msg):      
+        target_id = msg.order_id
+        
         if self.is_robot_busy or len(self.task_queue) > 0:
-            self.get_logger().warn(f'⏳ [주문 대기] 주문 번호 {msg.order_id}번은 대기열에 추가되었습니다.')
+            self.get_logger().warn(f'⏳ [주문 대기] 주문 번호 {target_id}번은 대기열에 추가되었습니다.')
         else:
-            self.current_order_id = msg.order_id
-            self.get_logger().info(f'📥 [주문 접수] 번호: {msg.order_id}번 조리를 즉시 시작합니다.')
+            self.current_order_id = target_id
+            self.get_logger().info(f'📥 [주문 접수] 번호: {target_id}번 조리를 즉시 시작합니다.')
 
-        self.is_patty_cooked_and_placed = False
-        self.is_fry_cooked_and_placed = False   
+        self.is_patty_cooked_and_placed[target_id] = False
+        self.is_fry_cooked_and_placed[target_id] = False   
         self.is_waiting_lock = False
-        self.sauce = False
-        self.fry_running = False
+        self.sauce[target_id] = False
+        self.fry_running[target_id] = False
 
-        # 감자튀김 조리 시작
         if msg.side_item != "NONE":
-            self.task_queue.extend([(msg.order_id, "튀김조리", "튀김", "튀김기")])
-            self.fry_running = True
+            self.task_queue.extend([(target_id, "튀김 조리", "튀김", "튀김기")])
+            self.fry_running[target_id] = True
 
-        # 패티 조리 시작
-        self.task_queue.extend([(msg.order_id, "패티조리", "패티", "그릴")])
+        self.task_queue.extend([(target_id, "패티 조리", "패티", "그릴")])
 
-        # 버거 기본 재료 쌓기
         for ingredient in msg.ingredients:
             if ingredient == "SAUCE":
-                self.sauce = True
+                self.sauce[target_id] = True
                 continue
                 
             if ingredient == "PATTY":
                 continue
             
             korean_name = self.map_ingredient_name(ingredient)
-            self.task_queue.extend([(msg.order_id, "재료 옮기기", korean_name, "버거 세팅지점")])
+            self.task_queue.extend([(target_id, "재료 옮기기", korean_name, "버거 세팅지점")])
 
-        # 음료수 추가
         if msg.beverage_item != "NONE":
             korean_beverage = self.map_ingredient_name(msg.beverage_item)
-            self.task_queue.extend([(msg.order_id, "음료수 옮기기", korean_beverage, "음료수_세팅지점")])
+            self.task_queue.extend([(target_id, "음료수 옮기기", korean_beverage, "음료수_세팅지점")])
 
-        self.task_queue.extend([(msg.order_id, "종이빼기", "종이", "버거 세팅")])
+        self.task_queue.extend([(target_id, "종이 빼기", "종이", "버거 세팅")])
 
-        # 일을 완수하면 다음 동작 수행
+        # 📈 진행률 분모 예측 규칙 적용
+        base_task_count = len([t for t in self.task_queue if t[0] == target_id])
+        predicted_interrupt_count = 1  # 패티뒤집기
+        if self.sauce[target_id]: predicted_interrupt_count += 1 # 소스뿌리기
+        if msg.side_item != "NONE": predicted_interrupt_count += 2 # 튀김옮기기+튀김세팅
+        predicted_interrupt_count += 1 # 최종 버거적재
+
+        self.total_predicted_tasks[target_id] = base_task_count + predicted_interrupt_count
+        self.completed_task_counts[target_id] = 0
+        self.current_progress_pct = 0
+
         if not self.is_robot_busy:
             self.send_next_task()
 
-    def send_next_task(self):   # 큐에서 작업 정보를 꺼내서 작업 수행
-        
-        if not self.task_queue:     # 모든 작업을 완료했을 때
-            if self.fry_running:    # 튀김기가 아직 조리중이면 대기
-                self.get_logger().warn('⏳ 튀김 완료 타이머를 대기합니다.', throttle_duration_sec=4.0)
+    def send_next_task(self):   
+        if not self.task_queue:     
+            active_fries = [oid for oid, running in self.fry_running.items() if running]
+            if active_fries:
+                self.get_logger().warn(f'⏳ 튀김 완료 타이머를 대기합니다.', throttle_duration_sec=4.0)
                 self.is_waiting_lock = True
                 self.is_robot_busy = False
                 return
@@ -98,26 +158,35 @@ class CookingManagerNode(Node):
             self.is_robot_busy = False
             self.is_waiting_lock = False
             self.current_order_id = 0
+            
+            # 공정이 완전히 끝나면 화면을 대기 중으로 세팅
+            # self.current_running_task = "대기 중"
+            # self.current_running_ingredient = "-"
+            # self.publish_to_admin()
             return
 
-        self.is_robot_busy = True
-        
-        # 패티 결합 전에는 상단 빵 작업 금지
-        if self.task_queue[0][2] == "상단 빵" and not self.is_patty_cooked_and_placed:
-            self.get_logger().warn('⚠️ 상단 빵 대기 중... 패티 조리 완수를 기다립니다.')
+        next_order_id = self.task_queue[0][0]
+        if self.task_queue[0][2] == "상단 빵" and not self.is_patty_cooked_and_placed.get(next_order_id, False):
+            self.get_logger().warn(f'⚠️ [주문 {next_order_id}] 상단 빵 대기 중... 패티 조리 완수를 기다립니다.')
             self.is_waiting_lock = True 
             self.is_robot_busy = False
             return
 
         self.is_waiting_lock = False
+        self.is_robot_busy = True
 
-        # 필터를 통과한 정상 작업 최종 pop
         order_id, task_type, ingredient, destination = self.task_queue.popleft()
         self.current_order_id = order_id
 
+        self.last_order_id = order_id 
         self.last_task = task_type
         self.last_ingredient = ingredient
         self.last_destination = destination
+
+        # ⚡ [실시간 공정 트래킹 업데이트] 로봇에게 액션을 넘기기 전에 현재 진행 공정 최신화
+        # self.current_running_task = task_type
+        # self.current_running_ingredient = ingredient
+        # # self.publish_to_admin()
 
         if not self.robot_action_client.wait_for_server(timeout_sec=5.0):
             self.get_logger().error('❌ /burger_task 액션 서버가 응답하지 않습니다.')
@@ -148,102 +217,114 @@ class CookingManagerNode(Node):
         get_result_future.add_done_callback(self.get_result_callback)
 
     def get_result_callback(self, future):
-        """ 액션 완수 시 타이머 가동 및 플래그 트리거 """
         status = future.result().status
-        
-        if status != 4:     #
+        if status != 4:     
             self.get_logger().error(f'🚨 [동작 실패] 안전을 위해 스케줄러를 차단합니다.')
             self.is_robot_busy = False
             return
         
-        # 타이머 가동 조건
-        if self.last_task == "튀김조리" and self.last_ingredient == "튀김" and self.last_destination == "튀김기":
-            self.get_logger().info('🍟 튀김망 투입 완료! 5분 감자튀김 튀기기 타이머 가동.')
-            self.fry_timer = self.create_timer(300.0, self.fry_done_callback)
-            
-        elif self.last_task == "패티조리" and self.last_ingredient == "패티" and self.last_destination == "그릴":
-            self.get_logger().info('🥩 패티 그릴 안착 완료! 1분 뒤집기 타이머 구동.')
-            self.patty_flip_timer = self.create_timer(60.0, self.patty_flip_callback) 
-            
-        elif self.last_task == "패티뒤집기" and self.last_ingredient == "패티" and self.last_destination == "그릴":
-            self.get_logger().info('🔄 패티 뒤집기 완료 확인! 후반전 조리 타이머 가동.')
-            self.patty_second_half_timer = self.create_timer(60.0, self.patty_done_callback) 
+        captured_id = self.last_order_id
+        
+        # 📈 [진행률 분자 계산] 액션이 성공적으로 수행 완료되면 카운트 업
+        # if captured_id in self.completed_task_counts:
+        #     self.completed_task_counts[captured_id] += 1
+        #     total = self.total_predicted_tasks.get(captured_id, 1)
+        #     current = self.completed_task_counts[captured_id]
+        #     self.current_progress_pct = min(int((current / total) * 100), 100)
+        #     self.publish_to_admin()
 
-        # 조리 완료된 패티를 작업 완료 시
+        if self.last_task == "튀김 조리" and self.last_ingredient == "튀김" and self.last_destination == "튀김기":
+            self.get_logger().info(f'🍟 [주문 {captured_id}] 튀김망 투입 완료! 5분 감자튀김 타이머 가동.')
+            self.fry_timers[captured_id] = self.create_timer(300.0, lambda: self.fry_done_callback(captured_id))
+            
+        elif self.last_task == "패티 조리" and self.last_ingredient == "패티" and self.last_destination == "그릴":
+            self.get_logger().info(f'🥩 [주문 {captured_id}] 패티 그릴 안착 완료! 1분 뒤집기 타이머 구동.')
+            self.patty_flip_timers[captured_id] = self.create_timer(60.0, lambda: self.patty_flip_callback(captured_id)) 
+            
+        elif self.last_task == "패티 뒤집기" and self.last_ingredient == "패티" and self.last_destination == "그릴":
+            self.get_logger().info(f'🔄 [주문 {captured_id}] 패티 뒤집기 완료 확인! 후반전 조리 타이머 가동.')
+            self.patty_second_half_timers[captured_id] = self.create_timer(60.0, lambda: self.patty_done_callback(captured_id)) 
+
         elif self.last_task == "재료 옮기기" and self.last_ingredient == "패티" and self.last_destination == "버거 세팅지점":
-            self.get_logger().info('✨ [락 해제] 패티가 결합되었습니다. 상단 빵 조립 락을 해제합니다.')
-            self.is_patty_cooked_and_placed = True
+            self.get_logger().info(f'✨ [락 해제] [주문 {captured_id}] 패티가 결합되었습니다. 상단 빵 조립 락을 해제합니다.')
+            self.is_patty_cooked_and_placed[captured_id] = True
 
-        # 안전하게 단 한 번만 다음 태스크 루프를 호출
         self.send_next_task()
 
     def insert_urgent_sequence(self, sequence):
-        # 1. 들어온 긴급 작업 리스트(sequence)에서 타입별로 분류
-        fry_setting_tasks = [t for t in sequence if t[1] == "튀김세팅"]
-        other_urgent_tasks = [t for t in sequence if t[1] != "튀김세팅"]
+        if not sequence: return
+        target_oid = sequence[0][0]
+        
+        # ⚡ [실시간 공정 인터럽트 트래킹] 타이머 스케줄이 터져서 새 모션이 기습 주입될 때도 화면 갱신
+        # self.current_running_task = sequence[0][1]
+        # self.current_running_ingredient = sequence[0][2]
+        # self.publish_to_admin()
 
-        # 2. 패티뒤집기, 튀김옮기기 등 일반 긴급 작업을 큐의 최전방 우선순위에 맞게 삽입
+        fry_setting_tasks = [t for t in sequence if t[1] == "튀김 세팅"]
+        other_urgent_tasks = [t for t in sequence if t[1] != "튀김 세팅"]
+
         for task in reversed(other_urgent_tasks):
             insert_idx = 0
             for i, q_task in enumerate(self.task_queue):
-                if q_task[1] in ["패티뒤집기", "튀김옮기기"]:
+                if q_task[1] in ["패티 뒤집기", "튀김 옮기기"]:
                     insert_idx = i + 1
                 else:
                     break
             self.task_queue.insert(insert_idx, task)
 
-        # 3. '튀김세팅' 작업이 존재할 경우 위치 지정 조 조립
         if fry_setting_tasks:
-            # 현재 큐에 '음료수 옮기기'가 있는지 확인
-            has_beverage = any(q_task[1] == "음료수 옮기기" for q_task in self.task_queue)
-
+            has_beverage = any(q_task[0] == target_oid and q_task[1] == "음료수 옮기기" for q_task in self.task_queue)
             if has_beverage:
-                # 🔄 음료수가 있다면: 음료수 바로 앞에 튀김세팅을 끼워넣기 위해 큐를 새로 빌드
                 new_queue = collections.deque()
                 for q_task in self.task_queue:
-                    if q_task[1] == "음료수 옮기기":
-                        # 음료수를 넣기 직전에 튀김세팅 작업들을 먼저 다 집어넣음
+                    if q_task[0] == target_oid and q_task[1] == "음료수 옮기기":
                         new_queue.extend(fry_setting_tasks)
                     new_queue.append(q_task)
                 self.task_queue = new_queue
             else:
-                # ↩️ 음료수가 없다면: 맨 마지막(종이빼기 뒤쪽)에 추가
-                self.task_queue.extend(fry_setting_tasks)
+                new_queue = collections.deque()
+                inserted = False
+                for q_task in self.task_queue:
+                    if q_task[0] == target_oid and q_task[1] == "종이  빼기":
+                        new_queue.extend(fry_setting_tasks)
+                        inserted = True
+                    new_queue.append(q_task)
+                if inserted: self.task_queue = new_queue
+                else: self.task_queue.extend(fry_setting_tasks)
 
-        # 4. 대기 중인 락 해제 및 다음 작업 실행 (비상정지 상태가 아닐 때만)
         if (self.is_waiting_lock or not self.is_robot_busy):
             self.is_waiting_lock = False
             self.send_next_task()
 
-    def patty_flip_callback(self):      
-        self.get_logger().warn('⏰ [타이머] 패티를 뒤집습니다.')
-        if self.patty_flip_timer:
-            self.patty_flip_timer.destroy()
-            self.patty_flip_timer = None
+    def patty_flip_callback(self, order_id):      
+        self.get_logger().warn(f'⏰ [타이머] {order_id}번 주문 패티를 뒤집습니다.')
+        if order_id in self.patty_flip_timers:
+            self.patty_flip_timers[order_id].destroy()
+            del self.patty_flip_timers[order_id]
 
-        urgent_sequence = [(self.current_order_id, "패티뒤집기", "패티", "그릴")]
-        if self.sauce:      # 소스를 주문 받았을 때 패티 뒤집은 후 소스 작업 시행
-            urgent_sequence.append((self.current_order_id, "소스뿌리기", "소스", "버거_세팅지점"))
+        urgent_sequence = [(order_id, "패티 뒤집기", "패티", "그릴")]
+        if self.sauce.get(order_id, False):      
+            urgent_sequence.append((order_id, "소스 뿌리기", "소스", "버거_세팅지점"))
         self.insert_urgent_sequence(urgent_sequence)
 
-    def fry_done_callback(self):
-        self.get_logger().warn('⏰ [타이머] 5분 경과! 감자튀김 조리가 끝나 수거합니다.')
-        if self.fry_timer:
-            self.fry_timer.destroy()
-            self.fry_timer = None
+    def fry_done_callback(self, order_id):
+        self.get_logger().warn(f'⏰ [타이머] 5분 경과! {order_id}번 주문 감자튀김 조리가 끝나 수거합니다.')
+        if order_id in self.fry_timers:
+            self.fry_timers[order_id].destroy()
+            del self.fry_timers[order_id]
 
-        extract_sequence = [(self.current_order_id, "튀김옮기기", "튀김", "튀김기 세팅지점"),
-                            (self.current_order_id, "튀김세팅", "튀김", "튀김 세팅지점")]
+        extract_sequence = [(order_id, "튀김 옮기기", "튀김", "튀김기 세팅지점"),
+                            (order_id, "튀김 세팅", "튀김", "튀김 세팅지점")]
         self.insert_urgent_sequence(extract_sequence)
-        self.fry_running = False 
+        self.fry_running[order_id] = False 
 
-    def patty_done_callback(self):
-        self.get_logger().warn('⏰ [타이머] 패티 최종 조리가 완료되었습니다. 버거 적재를 시작합니다.')
-        if self.patty_second_half_timer:
-            self.patty_second_half_timer.destroy()
-            self.patty_second_half_timer = None
+    def patty_done_callback(self, order_id):
+        self.get_logger().warn(f'⏰ [타이머] {order_id}번 주문 패티 최종 조리가 완료되었습니다. 버거 적재를 시작합니다.')
+        if order_id in self.patty_second_half_timers:
+            self.patty_second_half_timers[order_id].destroy()
+            del self.patty_second_half_timers[order_id]
 
-        patty_sequence = [(self.current_order_id, "재료 옮기기", "패티", "버거 세팅지점")]
+        patty_sequence = [(order_id, "재료 옮기기", "패티", "버거 세팅지점")]
         self.insert_urgent_sequence(patty_sequence)
 
     def map_ingredient_name(self, eng_name):

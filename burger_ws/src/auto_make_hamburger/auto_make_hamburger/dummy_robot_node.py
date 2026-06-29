@@ -57,13 +57,13 @@ def main(args=None):
     up_gradient = [394.8, -16.99, 528.09, 94.06, -62.64, -179.2]      # 재료 잡은 후 기울여서 안쪽으로 넣기
 
     grill_move = [365.05, 90.01, 479.81, 130.08, -89.88, -174.96]   # 그릴에 안걸리게 위치 이동 
-    grill_up = [528.39, -44.42, 460.39, 146.52, -77.65, 177.82]         # 그릴 위로 이동
+    grill_up = [467.99, -38.01, 552.64, 144.94, -56.48, -177.96]  
     grill_down = [632.34, -124.60, 236.11, 148.00, -116.67, -178.75]    # 패티 떨어 뜨리기
     flip_tool_home = [[542.58, -268.43, 379.72, 89.15, -91.45, -177.98], [544.3, -335.39, 376.47, 88.55, -91.56, -178.04]]  # 뒤집개 도구 잡기
     flip_tool_after = [624.54, 13.24, 443.65, 129.20, -94.28, -173.54]     # 뒤집개 도구 잡고 빼기
-    flip_home = [639.0, -144.81, 67.07, 151.86, -101.66, -178.25]   # 뒤집을 장소로 이동
+    flip_home = [611.24, -128.97, 75.69, 152.29, -101.75, -178.19]   # 뒤집을 장소로 이동
 
-    flip_ready = [[18, 0, 0, 0, 0, 0], [0, 0, 120, 0, 0, 0]]    # 패티 도구위에 올리기
+    flip_ready = [[25, 0, 0, 0, 0, 0], [0, 0, 150, 0, 0, 0]]    # 패티 도구위에 올리기
     flip_final_ready = [749.13, -200.46, 76.69, 151.77, -95.27, -178.07]   # 뒤집기 전 수평 맞추기
 
     plating_up = [572.9, 36.28, 550.34, 38.12,  72.86, -1.41]   # 트레이 위로 이동
@@ -209,9 +209,11 @@ def main(args=None):
     def flip():    # 패티 뒤집기
         movel(flip_home, vel=VELOCITY, acc=ACC)
         movel(flip_ready[0], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movel([0, -10, 0, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
         movel(flip_ready[1], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
         movel(flip_final_ready, vel=VELOCITY, acc=ACC)
-        movej([0, 0, 0, 0, 0, flip_angle], vel = 100, acc=150, mod=DR_MV_MOD_REL)
+        movel([0, 35, 0, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
+        movej([0, 0, 0, 0, 0, flip_angle], vel=100, acc=150, mod=DR_MV_MOD_REL)
         time.sleep(2)
         movel([30, 0, 0, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=DR_TOOL)
 
@@ -332,9 +334,8 @@ def main(args=None):
         
 
         # fry_in()
-        release()
-        movej(x0, vel=50, acc=100)
-        paper_grip()
+        grip_flip_tool()
+        flip()
         # movej(x0, vel=50, acc=100)
         # print(f"Moving to joint position: {x0}")
         

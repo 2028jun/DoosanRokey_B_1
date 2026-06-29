@@ -23,7 +23,7 @@ class OrderBridgeNode(Node):
         # 3. 주문 번호 카운터 (내부 관리용 변수)
         self.order_counter = 100       
 
-        self.get_logger().info('🍔 [React ➔ ROS2] 주문 중계 브릿지 노드가 시작되었습니다.')
+        self.get_logger().info('🍔 햄버거 주문 해주세요~')
 
     def react_order_callback(self, web_msg):
         """ 리액트 웹 UI에서 결제가 완료되어 웹소켓 신호가 들어오면 호출되는 콜백 함수 """

@@ -5,7 +5,8 @@ from hamburger_interfaces.action import BurgerTask
 from hamburger_interfaces.srv import EmergencyStop
 from dsr_msgs2.srv import GetToolForce
 import DR_init
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
+import sys
 
 # --- [로봇 기본 설정 및 전역 변수] ---
 ROBOT_ID = "dsr01"
@@ -32,9 +33,9 @@ grill_up = [467.99, -38.01, 552.64, 144.94, -56.48, -177.96]
 grill_down = [632.34, -124.60, 236.11, 148.00, -116.67, -178.75]    # 패티 떨어 뜨리기
 flip_tool_home = [[542.58, -268.43, 379.72, 89.15, -91.45, -177.98], [544.3, -335.39, 376.47, 88.55, -91.56, -178.04]]  # 뒤집개 도구 잡기
 flip_tool_after = [624.54, 13.24, 443.65, 129.20, -94.28, -173.54]     # 뒤집개 도구 잡고 빼기
-flip_home = [639.0, -144.81, 67.07, 151.86, -101.66, -178.25]   # 뒤집을 장소로 이동
+flip_home = [611.24, -128.97, 75.69, 152.29, -101.75, -178.19]   # 뒤집을 장소로 이동
 
-flip_ready = [[20, 0, 0, 0, 0, 0], [0, 0, 120, 0, 0, 0]]    # 패티 도구위에 올리기
+flip_ready = [[25, 0, 0, 0, 0, 0], [0, 0, 150, 0, 0, 0]]    # 패티 도구위에 올리기
 flip_final_ready = [749.13, -200.46, 76.69, 151.77, -95.27, -178.07]   # 뒤집기 전 수평 맞추기
 
 plating_up = [572.9, 36.28, 550.34, 38.12,  72.86, -1.41]   # 트레이 위로 이동
@@ -67,7 +68,7 @@ sauce_move = [[802.11, 276.99, 208.04, 17.15, 91.43, 92.42], [774.53, 266.42, 20
 drink_home = [223.52, -177.16, 90.54, 55.78, -96.52, -86.74] # 음료 잡기 준비
 drink_pick = [201.34, -271.24, 69.21, 55.78, -96.52, -86.74] # 음료 잡기
 drink_middle = [422.34, -233.62, 229.59, 86.51, -90.51, -88.66] # 음료 옮기기 중간
-drink_ready = [881.73, 75.51, 127.47, 176.65, -92.08, -90.80] # 음료 내리기
+drink_ready = [701.29, 51.84, 125.25, 175.76, -92.77, -91.11] # 음료 내리기
 
 paper_pick_up = [677.38, 185.46, 256.88, 14.22, 165.4, 11.45] # 종이컵 쟁반 전후
 paper_pick = [754.25, 201.00, 59.27, 13.88, 167.11, 11.34]  # 종이컵 쟁반위
@@ -81,18 +82,22 @@ class RobotControllerNode:
         # 두산 로봇 API 지연 임포트 및 바인딩
         self.init_robot_api(node)
 
-        self.force_sensor_pub = self.node.create_publisher(Bool, 'robot_force_sensor', 10)   # 외력 퍼블리시
+        self.force_sensor_pub = self.node.create_publisher(Bool, '/robot_force_sensor', 10)   # 외력 퍼블리시
         self.tool_force_client = self.node.create_client(GetToolForce, 'aux_control/get_tool_force')
         self.pending_tool_force_future = None
 
         self.force_monitor_timer = self.node.create_timer(0.1, self.publish_realtime_force)    # 외력을 계속 계산
-        self.FORCE_THRESHOLD = 35.0 # 외력 35이상 발생 시 비상정지
+        self.FORCE_THRESHOLD = 20.0 # 외력 20이상 발생 시 비상정지
         self.is_emergency = False
 
         self.current_goal_handle = None
 
         self.move_fry_done = False
         self.fry_setting = False
+
+        self.current_force_magnitude = 0
+        self.current_running_task = ""
+        self.current_running_ingredient = ""
 
         self.srv = self.node.create_service(
             EmergencyStop, 
@@ -109,17 +114,42 @@ class RobotControllerNode:
         )
         self.get_logger().info('🤖 두산 로봇 실구동 제어 액션 서버가 가동되었습니다.')
 
+        self.robot_sensor_pub = self.node.create_publisher(String, '/robot_raw_sensors', 10)
+        self.telemetry_pub = self.node.create_publisher(String, '/robot_telemetry_topic', 10)
+
         self.current_tool = None
+        self.gripper_hardware_status = "RELEASE"
+        self.current_tool_hmi = None
         
         # 시작 시 로봇 홈 위치로 초기화 이동
         self.get_logger().info(f"초기 조인트 위치 이동중...: {x0}")
         self.movej(x0, vel=50, acc=100)
         self.release()
 
+    def publish_telemetry(self):
+        force_val = round(self.current_force_magnitude, 2)  
+        tool_val = self.current_tool_hmi if self.current_tool_hmi else "그리퍼 단독" 
+        grip_val = self.gripper_hardware_status             
+        
+        # 상위 스케줄러 노드로부터 미디에이터 주입 받는 상태 변수 2종
+        task_val = self.current_running_task if hasattr(self, 'current_running_task') else "대기 중"
+        ingredient_val = self.current_running_ingredient if hasattr(self, 'current_running_ingredient') else "-"
+
+        # 🤝 총 5개 데이터를 콤마로 결합하여 하나의 채널로 업로드 송출
+        telemetry_string = f"{force_val},{tool_val},{grip_val},{task_val},{ingredient_val}"
+        
+        msg = String()
+        msg.data = telemetry_string
+        self.robot_sensor_pub.publish(msg)
+
     def paper_grip(self):
         self.movel(paper_pick_up, vel=VELOCITY, acc=ACC)
         self.movel(paper_pick, vel=VELOCITY, acc=ACC)
         self.grip()
+        self.movej([1.5, 0, 0, 0, 0, 0], vel=20, acc=30, mod=self.DR_MV_MOD_REL)
+        self.movej([-1.5, 0, 0, 0, 0, 0], vel=20, acc=30, mod=self.DR_MV_MOD_REL)
+        self.movej([1.5, 0, 0, 0, 0, 0], vel=20, acc=30, mod=self.DR_MV_MOD_REL)
+        self.movej([-1.5, 0, 0, 0, 0, 0], vel=20, acc=30, mod=self.DR_MV_MOD_REL)
         self.movel(paper_pick_up, vel=VELOCITY, acc=ACC)
         self.movel(paper_place, vel=VELOCITY, acc=ACC)
         self.release()
@@ -138,7 +168,9 @@ class RobotControllerNode:
 
         if self.is_emergency is True:
             self.get_logger().error(f"🛑 비상정지 시스템 가동: {reason}")
-            self.get_logger().error("⚠️ 로봇이 잠금 상태로 전환됩니다. 모든 모션 진입이 강제 차단됩니다.")
+            self.get_logger().error("⚠️ 로봇이 잠금 상태로 전환됩니다. 모든 명령이 강제 차단됩니다.")
+            # sys.exit(0)
+            self.drl_script_stop(0) 
             self.drl_script_pause()
 
             if self.current_goal_handle and self.current_goal_handle.is_active:
@@ -146,17 +178,15 @@ class RobotControllerNode:
                 self.current_goal_handle.abort()
 
             response.success = True
-            response.message = "비상 정지 시스템 가동"
+            response.message = f"로봇 급정거 및 잠금 완료 ({reason})"
             return response
 
         else:
-            self.get_logger().warn(f"🔓 비상정지 시스템 해제: {reason}")
-            self.get_logger().info("🔄 비상 상황이 종료되어 로봇 구동을 재개할 준비가 완료되었습니다.")
-            self.drl_script_resume()
+            self.get_logger().warn("🔓 비상정지 버튼이 해제되었습니다. 안전을 위해 재시작하십시오.")
             response.success = True
-            response.message = "비상 정지 시스템 해제"
+            response.message = "정지 버튼 해제됨 (재개하지 않음)"
             return response
-
+        
     def publish_realtime_force(self):
         if not self.tool_force_client.service_is_ready():
             return
@@ -177,13 +207,14 @@ class RobotControllerNode:
             return
 
         fx, fy, fz = result.tool_force[0], result.tool_force[1], result.tool_force[2]
-        force_magnitude = sqrt(fx**2 + fy**2 + fz**2)
+        self.current_force_magnitude = sqrt(fx**2 + fy**2 + fz**2)
 
         msg_sensor = Bool()
-        msg_sensor.data = force_magnitude >= self.FORCE_THRESHOLD
+        msg_sensor.data = self.current_force_magnitude >= self.FORCE_THRESHOLD
         if msg_sensor.data:
-            self.get_logger().error(f"🚨 [하드웨어 알람] 실시간 임계값 초과 힘 감지! 계측값: {force_magnitude:.2f} N")
+            self.get_logger().error(f"🚨 [하드웨어 알람] 실시간 임계값 초과 힘 감지! 계측값: {self.current_force_magnitude:.2f} N")
         self.force_sensor_pub.publish(msg_sensor)
+        self.publish_telemetry()
 
     def get_logger(self):
         return self.node.get_logger()
@@ -214,7 +245,7 @@ class RobotControllerNode:
             self.DR_MV_MOD_REL = dsr.DR_MV_MOD_REL
             self.get_tool_force = dsr.get_tool_force
             self.drl_script_pause = dsr.drl_script_pause
-            self.drl_script_resume = dsr.drl_script_resume
+            self.drl_script_stop = dsr.drl_script_stop
             
             # 그리퍼 초기 설정
             self.set_tool("Tool Weight_2FG")
@@ -240,6 +271,7 @@ class RobotControllerNode:
         self.set_digital_output(1, OFF)
         self.set_digital_output(3, OFF)
         self.node_sleep(1)
+        self.gripper_hardware_status = "RELEASE"
 
     def grip(self): # 그리퍼 잡기
         print("set for digital output 1 0 0 for grip")
@@ -247,6 +279,7 @@ class RobotControllerNode:
         self.set_digital_output(2, OFF)
         self.set_digital_output(3, OFF)
         self.node_sleep(1)
+        self.gripper_hardware_status = "GRIP"
 
     def source_grip(self): # 소스통 잡기
         print("set for digital output 0 0 1 for grip")
@@ -254,6 +287,8 @@ class RobotControllerNode:
         self.set_digital_output(1, OFF)
         self.set_digital_output(2, OFF)
         self.node_sleep(1)
+        self.gripper_hardware_status = "GRIP"
+        self.current_tool_hmi = "소스통"
 
     def grip_soft(self): # 소스통 누르기, 음료 잡기
         print("set for digital output 1 0 1 for grip")
@@ -261,6 +296,7 @@ class RobotControllerNode:
         self.set_digital_output(1, ON)
         self.set_digital_output(2, OFF)
         self.node_sleep(1)
+        self.gripper_hardware_status = "GRIP"
 
     def release_wait(self):  # 소스, 음료용 그리퍼놓기
         print("set for digital output 0 1 0 for release")
@@ -268,6 +304,7 @@ class RobotControllerNode:
         self.set_digital_output(1, OFF)
         self.set_digital_output(3, OFF)
         self.node_sleep(1)
+        self.gripper_hardware_status = "RELEASE"
 
     def shake(self):
         self.move_periodic(amp=[0,0,-10,0,0,0], period=0.5, atime=0.2, repeat=3, ref=self.DR_TOOL)
@@ -280,6 +317,8 @@ class RobotControllerNode:
         self.grip()
         self.movel(tool_after, vel=VELOCITY, acc=ACC)
         self.current_tool = "tool"
+        self.current_tool_hmi = "옮기기 도구"
+        
 
     def release_tool(self): # 옮기기 도구 놓기
         self.movel(tool_after, vel=VELOCITY, acc=ACC)
@@ -289,6 +328,7 @@ class RobotControllerNode:
         self.release()
         self.movel(tool_after, vel=VELOCITY, acc=ACC)
         self.current_tool = None
+        self.current_tool_hmi = None
 
     def grip_flip_tool(self):    # 뒤집기 도구 잡기
         self.movel(tool_after, vel=VELOCITY, acc=ACC)
@@ -297,6 +337,7 @@ class RobotControllerNode:
         self.grip()
         self.movel(flip_tool_after, vel=VELOCITY, acc=ACC)
         self.current_tool = "flip_tool"
+        self.current_tool_hmi = "뒤집개"
 
     def release_flip_tool(self):    # 뒤집기 도구 놓기
         self.movel(flip_tool_after, vel=VELOCITY, acc=ACC)
@@ -305,6 +346,7 @@ class RobotControllerNode:
         self.release()
         self.movel(flip_tool_after, vel=VELOCITY, acc=ACC)
         self.current_tool = None
+        self.current_tool_hmi = "None"
 
     # --- [재료 공급 및 가공 모션 시퀀스] ---
     def ingredients_grip(self):
@@ -343,9 +385,10 @@ class RobotControllerNode:
     def flip_patty(self):
         self.movel(flip_home, vel=VELOCITY, acc=ACC)
         self.movel(flip_ready[0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
+        self.movel([0, -10, 0, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
         self.movel(flip_ready[1], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
         self.movel(flip_final_ready, vel=VELOCITY, acc=ACC)
-        self.movel([0, 25, 0, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
+        self.movel([0, 35, 0, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
         self.movej([0, 0, 0, 0, 0, flip_angle], vel=100, acc=150, mod=self.DR_MV_MOD_REL)
         self.node_sleep(2)
         self.movel([30, 0, 0, 0, 0, 0], vel=VELOCITY, acc=ACC, ref=self.DR_TOOL)
@@ -410,6 +453,7 @@ class RobotControllerNode:
         self.movel(flip_tool_after, vel=50, acc=100)
         self.movel(sauce_pick, vel=VELOCITY, acc=ACC)
         self.release_wait()
+        self.current_tool_hmi = None
         self.movel(sauce_home, vel=VELOCITY, acc=ACC)
         self.movej(x0, vel=50, acc=100)
 
@@ -417,10 +461,12 @@ class RobotControllerNode:
         self.movel(drink_home, vel=VELOCITY, acc=ACC)
         self.movel(drink_pick, vel=VELOCITY, acc=ACC)
         self.grip_soft()
+        self.current_tool_hmi = "음료수"
         self.movel(drink_middle, vel=VELOCITY, acc=ACC)
         self.movel(drink_ready, vel=VELOCITY, acc=ACC)
         self.movel([0, -50, 0, 0, 0, 0], vel=VELOCITY, acc=ACC ,ref=self.DR_TOOL)
         self.release_wait()
+        self.current_tool_hmi = None
         self.movel([0, 0, -50, 0, 0, 0], vel=VELOCITY, acc=ACC ,ref=self.DR_TOOL)
         self.movel(drink_middle, vel=VELOCITY, acc=ACC)
 
@@ -429,9 +475,12 @@ class RobotControllerNode:
         self.current_goal_handle = goal_handle
 
         order_id = goal_handle.request.order_id
-        task = goal_handle.request.task_type        # 예: "PICK", "FLIP", "FRY" 등
-        item = goal_handle.request.ingredient       # 예: "patty", "bun_top", "topping1" 등
+        task = goal_handle.request.task_type        
+        item = goal_handle.request.ingredient       
         dest = goal_handle.request.destination
+
+        self.current_running_task = task
+        self.current_running_ingredient = item
 
         self.get_logger().info(f'📥 [명령 접수] 주문:{order_id} | Task:{task} | 대상:{item}')
 
@@ -443,7 +492,7 @@ class RobotControllerNode:
             return result
 
         try:
-            if task == "튀김조리":
+            if task == "튀김 조리":
                 if self.current_tool is not None:
                     if self.current_tool == "tool":
                         self.release_tool()
@@ -490,7 +539,7 @@ class RobotControllerNode:
                     self.get_logger().warn(f"미정의된 재료입니다: {item}")
 
             # 2. 패티 뒤집기 태스크 매핑
-            elif task == "패티뒤집기":
+            elif task == "패티 뒤집기":
                 if self.current_tool != "flip_tool":
                     if self.current_tool is None:
                         self.grip_flip_tool()
@@ -500,7 +549,7 @@ class RobotControllerNode:
                 self.flip_patty()
                 self.release_flip_tool() 
 
-            elif task == "패티조리":
+            elif task == "패티 조리":
                 if self.current_tool != "tool":
                     if self.current_tool is None:
                         self.grip_tool()
@@ -511,7 +560,7 @@ class RobotControllerNode:
                 self.ingredients_grip()
                 self.patty_to_grill()
 
-            elif task == "튀김옮기기":
+            elif task == "튀김 꺼내기":
                 if self.current_tool is not None:
                     if self.current_tool == "tool":
                         self.release_tool()
@@ -527,7 +576,7 @@ class RobotControllerNode:
                     self.fry_ingredients_setting()
                     self.movej(x0, vel=50, acc=100)
             
-            elif (task == "튀김세팅" and self.fry_setting == False):
+            elif (task == "튀김 세팅" and self.fry_setting == False):
                 if self.current_tool is not None:
                     if self.current_tool == "tool":
                         self.release_tool()
@@ -541,7 +590,7 @@ class RobotControllerNode:
                 self.get_logger().info(f"초기 조인트 위치 이동중...: {x0}")
                 self.movej(x0, vel=50, acc=100)
             
-            elif task == "소스뿌리기":
+            elif task == "소스 뿌리기":
                 if self.current_tool is not None:
                     if self.current_tool == "tool":
                         self.release_tool()
@@ -557,7 +606,7 @@ class RobotControllerNode:
                         self.release_flip_tool() 
                 self.drink_setting()
             
-            elif task == "종이빼기":
+            elif task == "종이 빼기":
                 if self.current_tool is not None:
                     if self.current_tool == "tool":
                         self.release_tool()
