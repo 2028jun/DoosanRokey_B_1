@@ -54,6 +54,10 @@
   - 제공 서비스
     - `/emergency_stop_robot_controller`(hamburger_interfaces/srv/EmergencyStop) 서비스 클라이언트 : 비상상황이 되면 True와 그에 대한 이유(관리자 버튼/외력)를 전송하면서 robot_controller_node에 비상정지 서비스를 요청합니다.
 
+<p align="center">
+  <img src="./system_design.png" alt="시스템 설계도 이미지" width="1000" height="1000" style="background-color:white">
+</p>
+
 
 ### 1-2. 플로우 차트 (Flow Chart)
 <p align="center">
