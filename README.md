@@ -148,6 +148,7 @@ source install/setup.bash
 ros2 run tf2_web_republisher tf2_web_republisher_node
 ```
 ### Step 8 [메인 제어 런치 파일 실행] 메인 제어 런치 파일을 실행합니다.
+### ui_node/cooking_manager_node/robot_controller_node/safety_manager_node가 함께 실행됩니다.
 ```bash
 cd ~/DoosanRokey_B_1/burger_ws
 source install/setup.bash
